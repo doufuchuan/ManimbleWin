@@ -1,0 +1,29 @@
+## Build results
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.userprefs
+
+## Visual Studio
+.vs/
+*.user
+*.aps
+*.ncb
+*.opendb
+*.VC.db
+
+## Rider
+.idea/
+
+## OS
+Thumbs.db
+.DS_Store
+
+## NuGet
+packages/
+*.nupkg
+
+## Publish
+publish/

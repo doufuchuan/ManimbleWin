@@ -1,0 +1,53 @@
+<UserControl x:Class="ManimbleWin.Views.DrawerPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ManimbleWin.Views"
+             Background="{DynamicResource ChromeBackgroundBrush}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- 标签栏 -->
+        <Border Grid.Row="0" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}" Background="{DynamicResource BarBackgroundBrush}">
+            <Grid>
+                <StackPanel Orientation="Horizontal" Margin="6,0,0,0">
+                    <RadioButton Content="Slide Notes" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
+                                 IsChecked="{Binding SelectedDrawerTab, Converter={StaticResource IndexEq}, ConverterParameter=0, Mode=TwoWay}"/>
+                    <RadioButton Content="Build Notes" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
+                                 IsChecked="{Binding SelectedDrawerTab, Converter={StaticResource IndexEq}, ConverterParameter=1, Mode=TwoWay}"/>
+                    <RadioButton Content="Alt Text" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
+                                 IsChecked="{Binding SelectedDrawerTab, Converter={StaticResource IndexEq}, ConverterParameter=2, Mode=TwoWay}"/>
+                    <RadioButton Content="Terminal 1" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
+                                 IsChecked="{Binding SelectedDrawerTab, Converter={StaticResource IndexEq}, ConverterParameter=3, Mode=TwoWay}"/>
+                </StackPanel>
+                <Button Style="{StaticResource ToolIconButton}" Width="26" Height="26" HorizontalAlignment="Right" Margin="0,0,6,0"
+                        ToolTip="Close drawer"
+                        Command="{Binding ToolbarCommand}" CommandParameter="ToggleDrawer">
+                    <Path Data="{StaticResource Icon.Close}" Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.5" Stretch="Uniform" Width="11" Height="11"/>
+                </Button>
+            </Grid>
+        </Border>
+
+        <!-- 标签内容 -->
+        <Grid Grid.Row="1">
+            <TextBox Visibility="{Binding SelectedDrawerTab, Converter={StaticResource IndexToVis}, ConverterParameter=0}"
+                     Text="{Binding SlideNotesText, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True" TextWrapping="Wrap" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
+                     BorderThickness="0" Padding="12,10" FontSize="12" VerticalScrollBarVisibility="Auto"/>
+
+            <TextBox Visibility="{Binding SelectedDrawerTab, Converter={StaticResource IndexToVis}, ConverterParameter=1}"
+                     Text="{Binding BuildNotesText, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True" TextWrapping="Wrap" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
+                     BorderThickness="0" Padding="12,10" FontSize="12" VerticalScrollBarVisibility="Auto"/>
+
+            <TextBox Visibility="{Binding SelectedDrawerTab, Converter={StaticResource IndexToVis}, ConverterParameter=2}"
+                     Text="{Binding AltTextText, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True" TextWrapping="Wrap" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
+                     BorderThickness="0" Padding="12,10" FontSize="12" VerticalScrollBarVisibility="Auto"/>
+
+            <local:TerminalView Visibility="{Binding SelectedDrawerTab, Converter={StaticResource IndexToVis}, ConverterParameter=3}"/>
+        </Grid>
+    </Grid>
+</UserControl>

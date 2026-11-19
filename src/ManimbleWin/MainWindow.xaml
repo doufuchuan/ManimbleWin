@@ -1,0 +1,428 @@
+<Window x:Class="ManimbleWin.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:ManimbleWin.Views"
+        xmlns:vm="clr-namespace:ManimbleWin.ViewModels"
+        xmlns:conv="clr-namespace:ManimbleWin.Helpers"
+        Title="Manimble — hello" Height="860" Width="1440" MinHeight="640" MinWidth="1000"
+        Background="{DynamicResource ChromeBackgroundBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.DataContext>
+        <vm:MainViewModel/>
+    </Window.DataContext>
+
+    <Window.InputBindings>
+        <KeyBinding Key="Z" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="Undo"/>
+        <KeyBinding Key="Z" Modifiers="Control+Shift" Command="{Binding MenuCommand}" CommandParameter="Redo"/>
+        <KeyBinding Key="N" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="NewDeck"/>
+        <KeyBinding Key="O" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="OpenDeck"/>
+        <KeyBinding Key="S" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="Save"/>
+        <KeyBinding Key="F" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="Find"/>
+        <KeyBinding Key="T" Modifiers="Control+Shift" Command="{Binding MenuCommand}" CommandParameter="InsertText"/>
+        <KeyBinding Key="N" Modifiers="Control+Shift" Command="{Binding MenuCommand}" CommandParameter="NewSlide"/>
+        <KeyBinding Key="D" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="DuplicateSlide"/>
+        <KeyBinding Key="Left" Command="{Binding NudgeCommand}" CommandParameter="Left"/>
+        <KeyBinding Key="Right" Command="{Binding NudgeCommand}" CommandParameter="Right"/>
+        <KeyBinding Key="Up" Command="{Binding NudgeCommand}" CommandParameter="Up"/>
+        <KeyBinding Key="Down" Command="{Binding NudgeCommand}" CommandParameter="Down"/>
+    </Window.InputBindings>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/> <!-- Menu -->
+            <RowDefinition Height="Auto"/> <!-- Toolbar -->
+            <RowDefinition Height="Auto"/> <!-- Home bar -->
+            <RowDefinition Height="*"/>    <!-- Body -->
+            <RowDefinition Height="Auto"/> <!-- Status bar -->
+        </Grid.RowDefinitions>
+
+        <!-- ====== 菜单栏 ====== -->
+        <Menu Grid.Row="0" Background="{DynamicResource BarBackgroundBrush}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12">
+            <MenuItem Header="File">
+                <MenuItem Header="New Deck…" Command="{Binding MenuCommand}" CommandParameter="NewDeck" InputGestureText="Ctrl+N"/>
+                <MenuItem Header="Open Deck or Project…" Command="{Binding MenuCommand}" CommandParameter="OpenDeck" InputGestureText="Ctrl+O"/>
+                <Separator/>
+                <MenuItem Header="Save to Original" Command="{Binding MenuCommand}" CommandParameter="Save" InputGestureText="Ctrl+S"/>
+                <MenuItem Header="Import…" Command="{Binding MenuCommand}" CommandParameter="Import"/>
+                <MenuItem Header="Export To">
+                    <MenuItem Header="PDF" Command="{Binding MenuCommand}" CommandParameter="ExportPDF"/>
+                    <MenuItem Header="PowerPoint (.pptx)" Command="{Binding MenuCommand}" CommandParameter="ExportPPT"/>
+                    <MenuItem Header="Movie (.mp4)" Command="{Binding MenuCommand}" CommandParameter="ExportMovie"/>
+                </MenuItem>
+                <MenuItem Header="Package Project for Sharing" Command="{Binding MenuCommand}" CommandParameter="Package"/>
+                <Separator/>
+                <MenuItem Header="Close Window" Command="{Binding MenuCommand}" CommandParameter="Close" InputGestureText="Ctrl+W"/>
+            </MenuItem>
+            <MenuItem Header="Edit">
+                <MenuItem Header="Undo" Command="{Binding MenuCommand}" CommandParameter="Undo" InputGestureText="Ctrl+Z"/>
+                <MenuItem Header="Redo" Command="{Binding MenuCommand}" CommandParameter="Redo" InputGestureText="Ctrl+Shift+Z"/>
+                <Separator/>
+                <MenuItem Header="Cut" Command="{Binding MenuCommand}" CommandParameter="Cut" InputGestureText="Ctrl+X"/>
+                <MenuItem Header="Copy" Command="{Binding MenuCommand}" CommandParameter="Copy" InputGestureText="Ctrl+C"/>
+                <MenuItem Header="Paste" Command="{Binding MenuCommand}" CommandParameter="Paste" InputGestureText="Ctrl+V"/>
+                <MenuItem Header="Select All" Command="{Binding MenuCommand}" CommandParameter="SelectAll" InputGestureText="Ctrl+A"/>
+                <Separator/>
+                <MenuItem Header="Find…" Command="{Binding MenuCommand}" CommandParameter="Find" InputGestureText="Ctrl+F"/>
+                <MenuItem Header="Find and Replace…" Command="{Binding MenuCommand}" CommandParameter="Replace" InputGestureText="Ctrl+Alt+F"/>
+            </MenuItem>
+            <MenuItem Header="Insert">
+                <MenuItem Header="Text" Command="{Binding MenuCommand}" CommandParameter="InsertText" InputGestureText="Ctrl+Shift+T"/>
+                <MenuItem Header="Formula…" Command="{Binding MenuCommand}" CommandParameter="InsertFormula" InputGestureText="Ctrl+Shift+E"/>
+                <MenuItem Header="Image…" Command="{Binding MenuCommand}" CommandParameter="InsertImage" InputGestureText="Ctrl+Shift+I"/>
+                <MenuItem Header="Table" Command="{Binding MenuCommand}" CommandParameter="InsertTable"/>
+                <MenuItem Header="Shape">
+                    <MenuItem Header="Rectangle" Command="{Binding MenuCommand}" CommandParameter="InsertShape"/>
+                    <MenuItem Header="Circle" Command="{Binding MenuCommand}" CommandParameter="InsertCircle"/>
+                </MenuItem>
+                <MenuItem Header="Draw">
+                    <MenuItem Header="Pen (freehand)" Command="{Binding MenuCommand}" CommandParameter="InsertPen" InputGestureText="Ctrl+Shift+P"/>
+                </MenuItem>
+                <MenuItem Header="BioCartoon…" Command="{Binding MenuCommand}" CommandParameter="BioCartoon"/>
+                <MenuItem Header="Python Plot…" Command="{Binding MenuCommand}" CommandParameter="PythonPlot"/>
+            </MenuItem>
+            <MenuItem Header="Slide">
+                <MenuItem Header="New Slide" Command="{Binding MenuCommand}" CommandParameter="NewSlide" InputGestureText="Ctrl+Shift+N"/>
+                <MenuItem Header="Duplicate Slide" Command="{Binding MenuCommand}" CommandParameter="DuplicateSlide" InputGestureText="Ctrl+D"/>
+                <MenuItem Header="Delete Slide" Command="{Binding MenuCommand}" CommandParameter="DeleteSlide"/>
+                <MenuItem Header="Hide / Unhide Slide" Command="{Binding MenuCommand}" CommandParameter="HideSlide" InputGestureText="Ctrl+Shift+H"/>
+                <Separator/>
+                <MenuItem Header="Move Slide Up" Command="{Binding MenuCommand}" CommandParameter="MoveSlideUp" InputGestureText="Ctrl+Alt+↑"/>
+                <MenuItem Header="Move Slide Down" Command="{Binding MenuCommand}" CommandParameter="MoveSlideDown" InputGestureText="Ctrl+Alt+↓"/>
+            </MenuItem>
+            <MenuItem Header="Format">
+                <MenuItem Header="Bold" Command="{Binding MenuCommand}" CommandParameter="Bold" InputGestureText="Ctrl+B"/>
+                <MenuItem Header="Italic" Command="{Binding MenuCommand}" CommandParameter="Italic" InputGestureText="Ctrl+I"/>
+                <MenuItem Header="Underline" Command="{Binding MenuCommand}" CommandParameter="Underline" InputGestureText="Ctrl+U"/>
+                <Separator/>
+                <MenuItem Header="Align Left" Command="{Binding MenuCommand}" CommandParameter="AlignLeft" InputGestureText="Ctrl+L"/>
+                <MenuItem Header="Align Center" Command="{Binding MenuCommand}" CommandParameter="AlignCenter" InputGestureText="Ctrl+E"/>
+                <MenuItem Header="Align Right" Command="{Binding MenuCommand}" CommandParameter="AlignRight" InputGestureText="Ctrl+R"/>
+                <Separator/>
+                <MenuItem Header="Theme…" Command="{Binding MenuCommand}" CommandParameter="Theme"/>
+                <MenuItem Header="Apply Dark Mode to Deck" Command="{Binding MenuCommand}" CommandParameter="InvertColors"/>
+                <MenuItem Header="Format Background…" Command="{Binding MenuCommand}" CommandParameter="Background"/>
+            </MenuItem>
+            <MenuItem Header="Arrange">
+                <MenuItem Header="Bring to Front" Command="{Binding MenuCommand}" CommandParameter="Front" InputGestureText="Ctrl+Shift+F"/>
+                <MenuItem Header="Bring Forward" Command="{Binding MenuCommand}" CommandParameter="Forward"/>
+                <MenuItem Header="Send Backward" Command="{Binding MenuCommand}" CommandParameter="Backward"/>
+                <MenuItem Header="Send to Back" Command="{Binding MenuCommand}" CommandParameter="Back"/>
+                <Separator/>
+                <MenuItem Header="Group" Command="{Binding MenuCommand}" CommandParameter="Group" InputGestureText="Ctrl+G"/>
+                <MenuItem Header="Ungroup" Command="{Binding MenuCommand}" CommandParameter="Ungroup" InputGestureText="Ctrl+Shift+G"/>
+            </MenuItem>
+            <MenuItem Header="View">
+                <MenuItem Header="Show Objects" IsCheckable="True" IsChecked="{Binding ShowObjects}" InputGestureText="Alt+Ctrl+J"/>
+                <MenuItem Header="Grid Lines" IsCheckable="True" IsChecked="{Binding ShowGrid}" InputGestureText="Alt+Ctrl+G"/>
+                <MenuItem Header="Ruler" IsCheckable="True" IsChecked="{Binding ShowRuler}" InputGestureText="Alt+Ctrl+U"/>
+                <MenuItem Header="Snap to Objects" IsCheckable="True" IsChecked="{Binding SnapToObjects}" InputGestureText="Alt+Ctrl+S"/>
+                <Separator/>
+                <MenuItem Header="Speaker Notes" Command="{Binding MenuCommand}" CommandParameter="SpeakerNotes" InputGestureText="Alt+Ctrl+K"/>
+                <MenuItem Header="Dark Mode (app)" IsCheckable="True" IsChecked="{Binding IsDarkMode}"/>
+                <MenuItem Header="Invert Colors" Command="{Binding MenuCommand}" CommandParameter="InvertColors" InputGestureText="Ctrl+Shift+Ctrl+I"/>
+                <Separator/>
+                <MenuItem Header="Zoom In" Command="{Binding ToolbarCommand}" CommandParameter="ZoomIn" InputGestureText="Ctrl+="/>
+                <MenuItem Header="Zoom Out" Command="{Binding ToolbarCommand}" CommandParameter="ZoomOut" InputGestureText="Ctrl+-"/>
+                <MenuItem Header="Fit in Window" Command="{Binding ToolbarCommand}" CommandParameter="ZoomFit" InputGestureText="Ctrl+0"/>
+                <Separator/>
+                <MenuItem Header="Show Terminal" Command="{Binding MenuCommand}" CommandParameter="ShowTerminal" InputGestureText="Alt+Ctrl+T"/>
+                <MenuItem Header="New Terminal" Command="{Binding MenuCommand}" CommandParameter="NewTerminal"/>
+                <Separator/>
+                <MenuItem Header="Hide/Show Slide Navigator" IsCheckable="True" IsChecked="{Binding NavigatorVisible}" InputGestureText="Alt+Ctrl+N"/>
+                <MenuItem Header="Hide/Show Inspector and Source" IsCheckable="True" IsChecked="{Binding InspectorVisible}" InputGestureText="Alt+Ctrl+I"/>
+            </MenuItem>
+            <MenuItem Header="Play">
+                <MenuItem Header="Show Animations" IsCheckable="True" IsChecked="{Binding ShowAnimations}"/>
+                <MenuItem Header="Play from Beginning" Command="{Binding MenuCommand}" CommandParameter="PlayFromBeginning" InputGestureText="Alt+Shift+Ctrl+P"/>
+                <MenuItem Header="Play from Current Slide" Command="{Binding MenuCommand}" CommandParameter="PlayFromCurrent" InputGestureText="Alt+Ctrl+P"/>
+                <MenuItem Header="Presenter View" Command="{Binding MenuCommand}" CommandParameter="Presenter" InputGestureText="Ctrl+Ctrl+P"/>
+                <MenuItem Header="Preview Current Slide's Animations" Command="{Binding MenuCommand}" CommandParameter="PreviewAnimation" InputGestureText="Alt+Ctrl+R"/>
+            </MenuItem>
+            <MenuItem Header="Help">
+                <MenuItem Header="Documentation" Command="{Binding MenuCommand}" CommandParameter="Docs"/>
+                <MenuItem Header="About Manimble" Command="{Binding MenuCommand}" CommandParameter="About"/>
+            </MenuItem>
+        </Menu>
+
+        <!-- ====== 工具栏 ====== -->
+        <Border Grid.Row="1" Background="{DynamicResource BarBackgroundBrush}" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}" Padding="6,5">
+            <Grid>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+
+                    <!-- New Slide（带下拉箭头） -->
+                    <Button Style="{StaticResource ToolTextButton}" ToolTip="New Slide" Command="{Binding ToolbarCommand}" CommandParameter="NewSlide">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Data="{StaticResource Icon.NewSlide}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                            <TextBlock Text="New Slide" FontSize="11" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="New Slide layouts" Width="14" Command="{Binding ToolbarCommand}" CommandParameter="NewSlideLayouts">
+                        <Path Data="{StaticResource Icon.Chevron}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="7" Height="7" RenderTransformOrigin="0.5,0.5">
+                            <Path.RenderTransform><RotateTransform Angle="90"/></Path.RenderTransform>
+                        </Path>
+                    </Button>
+
+                    <Button Style="{StaticResource ToolTextButton}" ToolTip="New Build" Command="{Binding ToolbarCommand}" CommandParameter="NewBuild">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Data="{StaticResource Icon.NewBuild}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                            <TextBlock Text="New Build" FontSize="11" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Expand All Builds" Command="{Binding ToolbarCommand}" CommandParameter="ExpandAll">
+                        <Path Data="{StaticResource Icon.Expand}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                    </Button>
+
+                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Insert Table" Command="{Binding ToolbarCommand}" CommandParameter="Table">
+                        <Path Data="{StaticResource Icon.Table}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Insert Text" Command="{Binding ToolbarCommand}" CommandParameter="Text">
+                        <Path Data="{StaticResource Icon.Text}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Insert Formula" Command="{Binding ToolbarCommand}" CommandParameter="Formula">
+                        <Path Data="{StaticResource Icon.Formula}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Insert Shape / Draw" Command="{Binding ToolbarCommand}" CommandParameter="Rectangle">
+                        <Path Data="{StaticResource Icon.Shape}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolTextButton}" ToolTip="BioCartoon icons" Command="{Binding ToolbarCommand}" CommandParameter="BioCartoon" FontSize="11">
+                        <TextBlock Text="BioCartoon" FontSize="11"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Insert Image" Command="{Binding ToolbarCommand}" CommandParameter="Image">
+                        <Path Data="{StaticResource Icon.Image}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                    </Button>
+
+                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+
+                    <!-- Theme 下拉（色块） -->
+                    <Button Style="{StaticResource ToolTextButton}" ToolTip="Theme" Command="{Binding ToolbarCommand}" CommandParameter="Theme">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Data="{StaticResource Icon.Shape}" Stroke="{DynamicResource AccentBrush}" StrokeThickness="1.6" Stretch="Uniform" Width="14" Height="14"/>
+                            <TextBlock Text="Theme" FontSize="11" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <ComboBox ItemsSource="{Binding Themes}" SelectedItem="{Binding CurrentTheme, Mode=TwoWay}" Width="132" Height="26" Margin="4,0,0,0" FontSize="11">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="14" Height="14" CornerRadius="2" Background="{Binding Background, Converter={StaticResource StrBrush}}" BorderThickness="1" BorderBrush="{DynamicResource SeparatorBrush}" Margin="0,0,6,0">
+                                        <TextBlock Text="Aa" FontSize="7" Foreground="{Binding Text, Converter={StaticResource StrBrush}}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Python Plot" Command="{Binding ToolbarCommand}" CommandParameter="PythonPlot">
+                        <Path Data="{StaticResource Icon.Plot}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                    </Button>
+
+                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Zoom Out" Command="{Binding ToolbarCommand}" CommandParameter="ZoomOut">
+                        <TextBlock Text="−" FontSize="16"/>
+                    </Button>
+                    <TextBlock Text="{Binding ZoomText}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Width="42" TextAlignment="Center"/>
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Zoom In" Command="{Binding ToolbarCommand}" CommandParameter="ZoomIn">
+                        <TextBlock Text="+" FontSize="15"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Fit in Window" Command="{Binding ToolbarCommand}" CommandParameter="ZoomFit">
+                        <Path Data="{StaticResource Icon.Zoom}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                    </Button>
+
+                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Dark Mode" Command="{Binding ToolbarCommand}" CommandParameter="DarkMode">
+                        <Path Data="{StaticResource Icon.Dark}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="Terminal" Command="{Binding ToolbarCommand}" CommandParameter="Terminal">
+                        <Path Data="{StaticResource Icon.Terminal}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.4" Stretch="Uniform" Width="16" Height="16"/>
+                    </Button>
+                </StackPanel>
+
+                <!-- 右侧：Present / Share -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Style="{StaticResource ToolTextButton}" ToolTip="Play from Current Slide" Command="{Binding MenuCommand}" CommandParameter="PlayFromCurrent">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Data="{StaticResource Icon.Play}" Fill="{DynamicResource AccentBrush}" Stretch="Uniform" Width="13" Height="13"/>
+                            <TextBlock Text="Play" FontSize="11" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource AccentButton}" ToolTip="Export / Share" Command="{Binding ToolbarCommand}" CommandParameter="Share" Height="26" Padding="10,4">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Data="{StaticResource Icon.Share}" Stroke="White" StrokeThickness="1.5" Stretch="Uniform" Width="13" Height="13"/>
+                            <TextBlock Text="Share" FontSize="11" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ====== Home 格式栏 ====== -->
+        <Border Grid.Row="2" Background="{DynamicResource BarBackgroundBrush}" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}" Padding="8,4">
+            <Grid>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+
+                    <!-- 字体 / 字号 -->
+                    <ComboBox Text="{Binding SelectedObject.Font, Mode=OneWay}" IsEditable="True" Width="120" Height="24" FontSize="11"
+                              ToolTip="Font" VerticalContentAlignment="Center">
+                        <ComboBoxItem Content="DejaVu Sans"/>
+                        <ComboBoxItem Content="Segoe UI"/>
+                        <ComboBoxItem Content="Georgia"/>
+                        <ComboBoxItem Content="Cambria Math"/>
+                        <ComboBoxItem Content="Consolas"/>
+                    </ComboBox>
+                    <ComboBox Text="{Binding SelectedObject.FontSize, Mode=OneWay}" IsEditable="True" Width="52" Height="24" FontSize="11"
+                              ToolTip="Font size" Margin="4,0,0,0" VerticalContentAlignment="Center">
+                        <ComboBoxItem Content="18"/>
+                        <ComboBoxItem Content="24"/>
+                        <ComboBoxItem Content="28"/>
+                        <ComboBoxItem Content="40"/>
+                        <ComboBoxItem Content="56"/>
+                        <ComboBoxItem Content="72"/>
+                    </ComboBox>
+
+                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+
+                    <!-- B I U S -->
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Bold" ToolTip="Bold (Ctrl+B)">
+                        <Path Data="{StaticResource Icon.Bold}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Italic" ToolTip="Italic (Ctrl+I)">
+                        <Path Data="{StaticResource Icon.Italic}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Underline" ToolTip="Underline (Ctrl+U)">
+                        <Path Data="{StaticResource Icon.Underline}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Strike" ToolTip="Strikethrough">
+                        <Path Data="{StaticResource Icon.Strike}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                    </Button>
+
+                    <!-- 高亮 / 颜色 -->
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Highlight" ToolTip="Highlight">
+                        <TextBlock Text="H" FontSize="13" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Color" ToolTip="Text color">
+                        <TextBlock Text="A" FontSize="14" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="Bold"/>
+                    </Button>
+
+                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+
+                    <!-- 列表 / 缩进 -->
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="BulletedList" ToolTip="Bulleted list">
+                        <Path Data="{StaticResource Icon.List}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="NumberedList" ToolTip="Numbered list">
+                        <TextBlock Text="1." FontSize="12"/>
+                    </Button>
+
+                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+
+                    <!-- 对齐 -->
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="AlignLeft" ToolTip="Align Left">
+                        <Path Data="{StaticResource Icon.AlignLeft}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="AlignCenter" ToolTip="Align Center">
+                        <Path Data="{StaticResource Icon.AlignCenter}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="AlignRight" ToolTip="Align Right">
+                        <Path Data="{StaticResource Icon.AlignRight}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                    </Button>
+
+                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+
+                    <!-- 网格 / 吸附 / 标尺 -->
+                    <ToggleButton Width="30" Height="26" IsChecked="{Binding ShowGrid}" ToolTip="Grid Lines" Foreground="{DynamicResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0" Cursor="Hand">
+                        <Path Data="{StaticResource Icon.Grid}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.2" Stretch="Uniform" Width="14" Height="14"/>
+                    </ToggleButton>
+                    <ToggleButton Width="30" Height="26" IsChecked="{Binding SnapToObjects}" ToolTip="Snap to Objects" Foreground="{DynamicResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0" Cursor="Hand">
+                        <TextBlock Text="⊞" FontSize="14"/>
+                    </ToggleButton>
+                    <ToggleButton Width="30" Height="26" IsChecked="{Binding ShowRuler}" ToolTip="Ruler" Foreground="{DynamicResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0" Cursor="Hand">
+                        <Path Data="{StaticResource Icon.Ruler}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.2" Stretch="Uniform" Width="14" Height="14"/>
+                    </ToggleButton>
+
+                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+
+                    <Button Style="{StaticResource ToolTextButton}" Command="{Binding MenuCommand}" CommandParameter="Script" ToolTip="Script">
+                        <TextBlock Text="Script" FontSize="11"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolTextButton}" Command="{Binding MenuCommand}" CommandParameter="ViewFeedback" ToolTip="View Feedback">
+                        <TextBlock Text="Feedback" FontSize="11"/>
+                    </Button>
+                </StackPanel>
+
+                <!-- 右侧：查找框 -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Width="220">
+                    <Border Background="{DynamicResource CodeBackgroundBrush}" BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="1" CornerRadius="4" Height="24">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Path Data="{StaticResource Icon.Search}" Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="13" Height="13" Margin="6,0,2,0" VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="1" Text="{Binding FindText, UpdateSourceTrigger=PropertyChanged}" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0" FontSize="11" VerticalContentAlignment="Center" ToolTip="Find"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ====== 主体：Navigator | Canvas+Drawer | Inspector+Source ====== -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="{Binding NavigatorWidth, Mode=TwoWay}"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="{Binding InspectorWidth, Mode=TwoWay}"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧 Navigator -->
+            <views:NavigatorPanel Grid.Column="0" Visibility="{Binding NavigatorVisible, Converter={StaticResource BoolToVis}}"/>
+
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent"
+                          ResizeBehavior="PreviousAndNext" Visibility="{Binding NavigatorVisible, Converter={StaticResource BoolToVis}}"/>
+
+            <!-- 中间：Canvas + Drawer -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="{Binding DrawerHeight, Mode=TwoWay}"/>
+                </Grid.RowDefinitions>
+                <views:CanvasView Grid.Row="0"/>
+                <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="Transparent" ResizeBehavior="PreviousAndNext"
+                              Visibility="{Binding DrawerVisible, Converter={StaticResource BoolToVis}}"/>
+                <views:DrawerPanel Grid.Row="2" Visibility="{Binding DrawerVisible, Converter={StaticResource BoolToVis}}"/>
+            </Grid>
+
+            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext"
+                          Visibility="{Binding InspectorVisible, Converter={StaticResource BoolToVis}}"/>
+
+            <!-- 右侧：Inspector + Source -->
+            <Grid Grid.Column="4" Visibility="{Binding InspectorVisible, Converter={StaticResource BoolToVis}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="{Binding SourceHeight, Mode=TwoWay}"/>
+                </Grid.RowDefinitions>
+                <views:InspectorPanel Grid.Row="0"/>
+                <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="Transparent" ResizeBehavior="PreviousAndNext"/>
+                <views:SourcePanel Grid.Row="2"/>
+            </Grid>
+        </Grid>
+
+        <!-- ====== 状态栏 ====== -->
+        <Border Grid.Row="4" Height="26" Background="{DynamicResource BarBackgroundBrush}" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource SeparatorBrush}" Padding="10,0">
+            <Grid>
+                <TextBlock Text="{Binding StatusBarText}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <TextBlock Text="BSD 2-Clause" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="UI Prototype v0.4.7" Foreground="{DynamicResource AccentBrush}" FontSize="10" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

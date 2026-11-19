@@ -1,0 +1,49 @@
+<UserControl x:Class="ManimbleWin.Views.SourcePanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{DynamicResource CodeBackgroundBrush}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Padding="10,7" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}">
+            <Grid>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Source" Style="{StaticResource PanelHeader}" Margin="0,0,8,0"/>
+                    <TextBlock Text="{Binding CurrentSlide.File}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Bottom"/>
+                </StackPanel>
+                <TextBlock Text="Python" Foreground="{DynamicResource WarmBrush}" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+
+        <!-- 代码显示：行号 + 源码。高亮选中对象的行 -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                      Background="{DynamicResource CodeBackgroundBrush}">
+            <ItemsControl ItemsSource="{Binding SourceLines}" AlternationCount="1000">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid MinHeight="18" MouseLeftButtonUp="Line_Click" Tag="{Binding}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="38"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <!-- 行号 -->
+                            <TextBlock Grid.Column="0" Text="{Binding Number}" Foreground="{DynamicResource TextSecondaryBrush}"
+                                       FontFamily="Consolas" FontSize="11" TextAlignment="Right" Padding="0,0,8,0" Opacity="0.6"/>
+                            <!-- 代码行 -->
+                            <TextBlock Grid.Column="1" Text="{Binding Text}" FontFamily="Consolas" FontSize="11"
+                                       Foreground="{Binding ColorBrush}" TextWrapping="NoWrap"/>
+                            <!-- 高亮改动行 -->
+                            <Rectangle Grid.ColumnSpan="2" Fill="{DynamicResource AccentSoftBrush}" IsHitTestVisible="False"
+                                       Visibility="{Binding Highlighted, Converter={StaticResource BoolToVis}}"/>
+                            <Border Grid.ColumnSpan="2" BorderThickness="2,0,0,0" BorderBrush="{DynamicResource AccentBrush}"
+                                    IsHitTestVisible="False" Visibility="{Binding Highlighted, Converter={StaticResource BoolToVis}}"/>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </Grid>
+</UserControl>
