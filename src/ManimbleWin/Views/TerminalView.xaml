@@ -1,26 +1,12 @@
 <UserControl x:Class="ManimbleWin.Views.TerminalView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="#141414">
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-
-        <!-- 终端工具条 -->
-        <Border Grid.Row="0" Padding="8,5" BorderThickness="0,0,0,1" BorderBrush="#2A2A2A">
-            <StackPanel Orientation="Horizontal">
-                <Button Style="{StaticResource ToolIconButton}" Width="26" Height="22" ToolTip="新建终端" Command="{Binding MenuCommand}" CommandParameter="NewTerminal">
-                    <Path Data="{StaticResource Icon.Plus}" Stroke="#CCCCCC" StrokeThickness="1.6" Stretch="Uniform" Width="11" Height="11"/>
-                </Button>
-                <TextBlock Text="bash — Manimble 终端" Foreground="#7A7A7A" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" Margin="8,0,0,0"/>
-            </StackPanel>
-        </Border>
-
-        <!-- 终端输出（可交互历史） -->
-        <ScrollViewer x:Name="OutputScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="10,8">
+             Background="{DynamicResource CodeBackgroundBrush}">
+    <!-- 只有输出区：提示符与输入行就是输出流的最后一行，点任意位置即可输入 -->
+    <ScrollViewer x:Name="OutputScroll" VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled" Padding="12,8,12,8"
+                  MouseDown="OutputScroll_MouseDown" Background="Transparent">
+        <StackPanel>
             <ItemsControl ItemsSource="{Binding Terminal.Lines}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
@@ -30,21 +16,22 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
-        </ScrollViewer>
 
-        <!-- 输入行 -->
-        <Border Grid.Row="2" BorderThickness="0,1,0,0" BorderBrush="#2A2A2A" Padding="8,6">
-            <Grid>
+            <!-- 当前输入行：无边框，直接接在输出下面（类似 VSCode 集成终端） -->
+            <Grid Margin="0,1,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="➜  " Foreground="#33FF66" FontFamily="Consolas" FontSize="11.5" VerticalAlignment="Center"/>
-                <TextBox x:Name="InputBox" Grid.Column="1" Background="Transparent" Foreground="#DDDDDD" BorderThickness="0"
+                <TextBlock Text="{Binding Terminal.PromptText}" Foreground="#33FF66" FontFamily="Consolas"
+                           FontSize="11.5" VerticalAlignment="Top" Margin="0,0,6,0"/>
+                <TextBox x:Name="InputBox" Grid.Column="1" Background="Transparent"
+                         Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0" Padding="0"
                          FontFamily="Consolas" FontSize="11.5" CaretBrush="#33FF66"
+                         TextWrapping="Wrap" AcceptsReturn="False"
                          Text="{Binding Terminal.Input, UpdateSourceTrigger=PropertyChanged}"
                          KeyDown="InputBox_KeyDown"/>
             </Grid>
-        </Border>
-    </Grid>
+        </StackPanel>
+    </ScrollViewer>
 </UserControl>

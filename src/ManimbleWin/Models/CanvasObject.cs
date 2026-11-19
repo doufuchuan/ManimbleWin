@@ -29,6 +29,10 @@ namespace ManimbleWin.Models
         private string _imageLabel = "";
         private string _loc = "slides.py:1";
         private string _spritePath = "";
+        private string _codeId = "";
+
+        /// <summary>写进源码注释里的稳定标识（# manimble:ab12cd），用于精确找回对象对应的代码行。</summary>
+        public string CodeId { get => _codeId; set { _codeId = value; Notify(nameof(CodeId)); } }
 
         public string Oid { get => _oid; set { _oid = value; Notify(nameof(Oid)); } }
         public ObjectKind Kind { get => _kind; set { _kind = value; Notify(nameof(Kind)); Notify(nameof(KindLabel)); Notify(nameof(FontFamilyName)); } }

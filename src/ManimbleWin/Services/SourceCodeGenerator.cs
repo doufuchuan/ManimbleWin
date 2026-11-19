@@ -16,6 +16,13 @@ namespace ManimbleWin.Services
     {
         private const string Marker = "# manimble";
 
+        /// <summary>每个对象带一个稳定 id，源码行被插入/删除后仍能找回自己那一行。</summary>
+        private static string MarkerOf(CanvasObject o) =>
+            string.IsNullOrEmpty(o?.CodeId) ? Marker : Marker + ":" + o.CodeId;
+
+        /// <summary>为新对象分配源码标识。</summary>
+        public static string NewCodeId() => Guid.NewGuid().ToString("N").Substring(0, 6);
+
         /// <summary>为一个新对象生成一行 Manim 代码（含 manimble 标记，便于回读定位）。</summary>
         public static string LineFor(CanvasObject o, double frameW = 1280, double frameH = 720)
         {
@@ -28,25 +35,25 @@ namespace ManimbleWin.Services
             switch (o.Kind)
             {
                 case ObjectKind.Tex:
-                    string tex = string.IsNullOrEmpty(o.Value) ? o.DisplayText : o.Value;
-                    return $"self.add(MathTex(r\"{Escape(tex)}\", font_size={Int(o.FontSize)}, color=\"{color}\").move_to({pos}))  {Marker}";
+                    string tex = NormalizeTex(string.IsNullOrEmpty(o.Value) ? o.DisplayText : o.Value);
+                    return $"self.add(MathTex({RawString(tex)}, font_size={Int(o.FontSize)}, color=\"{color}\").move_to({pos}))  {MarkerOf(o)}";
 
                 case ObjectKind.Image:
-                    return $"self.add(ImageMobject(\"assets/picture.png\").scale(0.6).move_to({pos}))  {Marker}";
+                    return $"self.add(ImageMobject(\"assets/picture.png\").scale(0.6).move_to({pos}))  {MarkerOf(o)}";
 
                 case ObjectKind.Table:
-                    return $"self.add(Table([[\"1\", \"2\"], [\"3\", \"4\"]]).scale(0.8).move_to({pos}))  {Marker}";
+                    return $"self.add(Table([[\"1\", \"2\"], [\"3\", \"4\"]]).scale(0.8).move_to({pos}))  {MarkerOf(o)}";
 
                 case ObjectKind.Line:
-                    return $"self.add(Line(LEFT, RIGHT, color=\"{color}\").move_to({pos}))  {Marker}";
+                    return $"self.add(Line(LEFT, RIGHT, color=\"{color}\").move_to({pos}))  {MarkerOf(o)}";
 
                 case ObjectKind.Shape:
                     string label = o.ShapeLabel ?? "Rectangle";
                     if (label == "Circle" || label == "Ellipse")
-                        return $"self.add(Circle(color=\"{color}\").scale(0.5).move_to({pos}))  {Marker}";
+                        return $"self.add(Circle(color=\"{color}\").scale(0.5).move_to({pos}))  {MarkerOf(o)}";
                     if (label == "Triangle")
-                        return $"self.add(Triangle(color=\"{color}\").scale(0.5).move_to({pos}))  {Marker}";
-                    return $"self.add(Rectangle(color=\"{color}\").scale(0.5).move_to({pos}))  {Marker}";
+                        return $"self.add(Triangle(color=\"{color}\").scale(0.5).move_to({pos}))  {MarkerOf(o)}";
+                    return $"self.add(Rectangle(color=\"{color}\").scale(0.5).move_to({pos}))  {MarkerOf(o)}";
 
                 default: // Text
                     string txt = string.IsNullOrEmpty(o.Value) ? o.DisplayText : o.Value;
@@ -54,7 +61,7 @@ namespace ManimbleWin.Services
                     sb.Append($"self.add(Text(\"{Escape(txt)}\", font_size={Int(o.FontSize)}, color=\"{color}\"");
                     if (o.Bold) sb.Append(", weight=BOLD");
                     if (o.Italic) sb.Append(", slant=ITALIC");
-                    sb.Append($").move_to({pos}))  {Marker}");
+                    sb.Append($").move_to({pos}))  {MarkerOf(o)}");
                     return sb.ToString();
             }
         }
@@ -66,7 +73,7 @@ namespace ManimbleWin.Services
             var sb = new StringBuilder();
             sb.AppendLine($"class {className}(MovingCameraScene):");
             sb.AppendLine("    def construct(self):");
-            sb.AppendLine($"        self.add(Text(\"{Escape(t)}\", font_size=48)  {Marker}");
+            sb.AppendLine($"        self.add(Text(\"{Escape(t)}\", font_size=48))  {Marker}");
             return sb.ToString().TrimEnd();
         }
 
@@ -104,8 +111,18 @@ namespace ManimbleWin.Services
             if (string.IsNullOrEmpty(source) || o == null) { note = "没有可写回的源码"; return false; }
 
             var lines = source.Replace("\r\n", "\n").Split('\n').ToList();
-            int idx = o.SourceLine - 1;
+
+            // 先用对象自己的源码标识定位（行号会随编辑漂移，标识不会）；
+            // 没有标识的历史对象才退回 SourceLine。
+            int idx = -1;
+            if (!string.IsNullOrEmpty(o.CodeId))
+            {
+                string tag = Marker + ":" + o.CodeId;
+                idx = lines.FindIndex(l => l.Contains(tag));
+            }
+            if (idx < 0) idx = o.SourceLine - 1;
             if (idx < 0 || idx >= lines.Count) { note = "找不到对象对应的源码行"; return false; }
+            o.SourceLine = idx + 1;
 
             string line = lines[idx];
             string trimmed = line.Trim();
@@ -211,6 +228,34 @@ namespace ManimbleWin.Services
         private static double ToManimY(double canvasY, double frameH) => (0.5 - canvasY / frameH) * 8.0;
 
         private static string Escape(string s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n");
+
+        /// <summary>
+        /// 公式值可能粘着 Python 字符串外壳（例如从源码回读到的 r"x^2"），
+        /// 直接再套一层 raw string 会生成 rr"…" 这种语法错误，这里先剥掉。
+        /// </summary>
+        private static string NormalizeTex(string tex)
+        {
+            string t = (tex ?? "").Trim();
+            if (t.Length == 0) return t;
+            var m = System.Text.RegularExpressions.Regex.Match(
+                t, "^(?:[rR])?(?:\"([\\s\\S]*)\"|'([\\s\\S]*)')$");
+            if (m.Success)
+            {
+                string inner = m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value;
+                if (inner.Length > 0) return inner;
+            }
+            return t;
+        }
+
+        /// <summary>把公式写成 Python raw string：保留反斜杠，按内容选择引号，绝不出现 rr"…"。</summary>
+        private static string RawString(string s)
+        {
+            string t = (s ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+            if (!t.Contains("\"")) return "r\"" + t + "\"";
+            if (!t.Contains("'")) return "r'" + t + "'";
+            // 单双引号都有：退回普通字符串（反斜杠转义，Python 侧仍还原为 LaTeX）
+            return "\"" + t.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        }
 
         private static string Num(double d) => d.ToString("0.##", CultureInfo.InvariantCulture);
         private static string Int(double d) => Math.Max(8, (int)Math.Round(d)).ToString(CultureInfo.InvariantCulture);

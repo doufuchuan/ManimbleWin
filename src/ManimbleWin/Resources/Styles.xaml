@@ -284,4 +284,41 @@
         <Setter Property="Padding" Value="6,4"/>
         <Setter Property="FontSize" Value="12"/>
     </Style>
+
+    <!-- 复选框（自绘，适配明暗主题） -->
+    <Style x:Key="ThemedCheckBox" TargetType="CheckBox">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                        <Border x:Name="Box" Width="14" Height="14" CornerRadius="3" BorderThickness="1"
+                                BorderBrush="{DynamicResource SeparatorBrush}"
+                                Background="{DynamicResource CodeBackgroundBrush}"
+                                VerticalAlignment="Center">
+                            <Path x:Name="Tick" Data="M0,3 L2.6,5.8 L7.4,0.8" Stroke="White" StrokeThickness="1.8"
+                                  Stretch="Uniform" Width="8" Height="6" Visibility="Collapsed"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                        </Border>
+                        <ContentPresenter Margin="7,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Box" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            <Setter TargetName="Tick" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 </ResourceDictionary>

@@ -26,6 +26,9 @@ namespace ManimbleWin.ViewModels
         public string StatusText { get; private set; } = "未连接";
         public event Action<string> Log;
 
+        /// <summary>引擎 deck 里真实存在的场景名，用来判断某页能否写回引擎。</summary>
+        public HashSet<string> EngineScenes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         public EngineIntegration(MainViewModel vm)
         {
             _vm = vm;
@@ -124,15 +127,38 @@ namespace ManimbleWin.ViewModels
                     idx++;
                 }
 
+                EngineScenes.Clear();
+                foreach (var ns in newSlides) EngineScenes.Add(ns.Name);
+
+                // 合并而不是清空：连接引擎不应该抹掉用户已在应用里做好的内容。
+                // 同名页用引擎的源码/行号更新，引擎里没有的页原样保留，引擎新增的页追加到末尾。
+                string currentName = _vm.CurrentSlide?.Name;
                 await Application.Current.Dispatcher.InvokeAsync(() =>
                 {
-                    _vm.Slides.Clear();
-                    foreach (var s in newSlides) _vm.Slides.Add(s);
-                    if (_vm.Slides.Count > 0) _vm.CurrentSlide = _vm.Slides[0];
+                    var existing = _vm.Slides.ToList();
+                    foreach (var ns in newSlides)
+                    {
+                        var match = existing.FirstOrDefault(s => string.Equals(s.Name, ns.Name, StringComparison.Ordinal));
+                        if (match == null)
+                        {
+                            _vm.Slides.Add(ns);
+                            continue;
+                        }
+                        match.File = ns.File;
+                        match.Line = ns.Line;
+                        match.Error = ns.Error;
+                        match.Hidden = ns.Hidden;
+                        if (!string.IsNullOrWhiteSpace(ns.Source)) match.Source = ns.Source;
+                    }
+
+                    if (_vm.CurrentSlide == null && _vm.Slides.Count > 0) _vm.CurrentSlide = _vm.Slides[0];
+                    if (currentName != null && !string.Equals(_vm.CurrentSlide?.Name, currentName, StringComparison.Ordinal))
+                        _vm.CurrentSlide = _vm.Slides.FirstOrDefault(s => string.Equals(s.Name, currentName, StringComparison.Ordinal)) ?? _vm.CurrentSlide;
                 });
 
-                // 加载当前场景的渲染数据
-                if (_vm.CurrentSlide != null) await LoadSceneInto(_vm.CurrentSlide);
+                // 只给「引擎也认识」的当前页刷真实渲染帧，应用内独有的页面保持原样
+                if (_vm.CurrentSlide != null && EngineScenes.Contains(_vm.CurrentSlide.Name))
+                    await LoadSceneInto(_vm.CurrentSlide);
             }
             catch (EngineException ex)
             {
@@ -299,6 +325,15 @@ namespace ManimbleWin.ViewModels
         public async Task<bool> ApplyTextEdit(Slide slide, string expected, string text)
         {
             if (!IsConnected || slide == null) return false;
+
+            // 应用内独有的页（引擎 deck 里没有同名场景）不能写回，否则一定被引擎拒绝；
+            // 这种页只在本地生效，并明确告诉用户原因。
+            if (EngineScenes.Count > 0 && !EngineScenes.Contains(slide.Name))
+            {
+                Say($"「{slide.Name}」不在引擎当前 deck 中，改动已保存在应用内（未写回文件）。");
+                return true;
+            }
+
             try
             {
                 var r = await _engine.EditSource(slide.Name, slide.File, expected, text);

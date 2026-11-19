@@ -40,6 +40,17 @@ namespace ManimbleWin.ViewModels
 
         public bool IsBusy { get => _isBusy; set { if (SetProperty(ref _isBusy, value)) { RaisePropertyChanged(nameof(InstallEnabled)); } } }
 
+        /// <summary>pip 走清华镜像（国内网络更稳），失败会自动回落到官方 PyPI。</summary>
+        private bool _useMirror = InstallerService.UseMirror;
+        public bool UseMirror
+        {
+            get => _useMirror;
+            set
+            {
+                if (SetProperty(ref _useMirror, value)) InstallerService.UseMirror = value;
+            }
+        }
+
         public bool AllReady => EvaluateReady(false);
         public bool CoreReady => EvaluateReady(true);
         public bool InstallEnabled => !IsBusy;
@@ -134,6 +145,10 @@ namespace ManimbleWin.ViewModels
                     IsBusy = false;
                 });
                 Log(ok ? $"{dep.Name}：操作已完成，建议重新检测。" : $"{dep.Name}：操作未完成。", !ok);
+
+                // Manim 装好后直接让主窗口连引擎，省得用户再点一次
+                if (ok && dep.Id == "manim") _main.ConnectFromTerminal();
+
                 // 安装完自动重新检测
                 Refresh();
             });

@@ -38,14 +38,85 @@ namespace ManimbleWin.Services
         {
             get
             {
-                string p = Path.Combine(ProjectRoot, ".venv", "Scripts", "python.exe");
+                string p = VenvPythonTarget;
                 return File.Exists(p) ? p : null;
             }
         }
 
-        /// <summary>用户级安装目录，用于存放我们创建的 venv。</summary>
-        public static string UserDataDir => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ManimbleWin");
+        private static string _venvDir;
+
+        /// <summary>
+        /// 我们创建 / 复用的 venv 目录。优先项目内 .venv（便于跟随项目迁移、不必写 AppData），
+        /// 项目目录不可写时才退到用户数据目录。
+        /// </summary>
+        public static string VenvDir
+        {
+            get
+            {
+                if (_venvDir != null) return _venvDir;
+                string proj = Path.Combine(ProjectRoot, ".venv");
+                _venvDir = CanWriteTo(ProjectRoot) || Directory.Exists(proj)
+                    ? proj
+                    : Path.Combine(UserDataDir, "venv");
+                return _venvDir;
+            }
+        }
+
+        public static string VenvPythonTarget => Path.Combine(VenvDir, "Scripts", "python.exe");
+
+        private static string _dataDir;
+
+        /// <summary>
+        /// 应用数据目录（venv 兜底位置、LaTeX 缓存、临时文件）。
+        /// 并非所有机器都允许写入 %LOCALAPPDATA%（企业策略 / 安全软件 / 便携运行），
+        /// 因此这里按顺序探测一个真正可写的目录，而不是假定 AppData 一定可用。
+        /// </summary>
+        public static string UserDataDir
+        {
+            get
+            {
+                if (_dataDir != null) return _dataDir;
+                var candidates = new List<string>
+                {
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ManimbleWin"),
+                    Path.Combine(ProjectRoot, ".data")
+                };
+                string tempRoot = Path.GetTempPath();
+                if (!string.IsNullOrEmpty(tempRoot)) candidates.Add(Path.Combine(tempRoot, "ManimbleWin"));
+
+                foreach (var c in candidates)
+                {
+                    if (TryPrepare(c)) { _dataDir = c; return c; }
+                }
+                _dataDir = Path.Combine(ProjectRoot, ".data");
+                try { Directory.CreateDirectory(_dataDir); } catch { }
+                return _dataDir;
+            }
+        }
+
+        /// <summary>应用专属临时目录，规避受限环境下的 %TEMP% 不可写问题。</summary>
+        public static string TempDir => Path.Combine(UserDataDir, "tmp");
+
+        /// <summary>目录能否创建并写入（写一个探针文件后删除）。</summary>
+        public static bool CanWriteTo(string dir)
+        {
+            if (string.IsNullOrWhiteSpace(dir)) return false;
+            return TryPrepare(dir);
+        }
+
+        private static bool TryPrepare(string dir)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(dir)) return false;
+                Directory.CreateDirectory(dir);
+                string probe = Path.Combine(dir, ".write-probe-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                File.WriteAllText(probe, "ok");
+                try { File.Delete(probe); } catch { }
+                return true;
+            }
+            catch { return false; }
+        }
 
         private static ProcessStartInfo QuietPsi(string file, string args)
         {
@@ -62,16 +133,29 @@ namespace ManimbleWin.Services
             return psi;
         }
 
-        /// <summary>给子进程设置应用专属临时目录，规避受限环境下的 %TEMP% 权限问题。</summary>
+        /// <summary>
+        /// 给子进程设置可写的临时目录与 UTF-8 输出。
+        /// Python 默认按系统代码页（中文 Windows 是 GBK）写错误信息，父进程按 UTF-8 读会变成乱码，
+        /// 所以这里强制 PYTHONUTF8/PYTHONIOENCODING，保证日志里的 "拒绝访问" 之类能正常显示。
+        /// </summary>
         public static void ApplyCleanTemp(ProcessStartInfo psi)
         {
             try
             {
-                string appTmp = Path.Combine(UserDataDir, "tmp");
+                string appTmp = TempDir;
                 Directory.CreateDirectory(appTmp);
                 psi.Environment["TMP"] = appTmp;
                 psi.Environment["TEMP"] = appTmp;
                 psi.Environment["TMPDIR"] = appTmp;
+            }
+            catch { }
+
+            try
+            {
+                psi.Environment["PYTHONUTF8"] = "1";
+                psi.Environment["PYTHONIOENCODING"] = "utf-8";
+                psi.Environment["PIP_DISABLE_PIP_VERSION_CHECK"] = "1";
+                psi.Environment["PIP_NO_INPUT"] = "1";
             }
             catch { }
         }
@@ -203,20 +287,73 @@ namespace ManimbleWin.Services
         {
             string latex = FindOnPath("latex.exe") ?? FindOnPath("latex");
             if (latex != null) return latex;
-            // 常见 TeX Live / MiKTeX 路径
-            foreach (var baseDir in new[]
+
+            // 常见发行版的固定布局，避免递归扫盘（TeX Live 有几十万文件，全盘搜索会卡好几秒）
+            var roots = new List<string>
             {
-                @"E:\texlive", @"C:\texlive", @"C:\Program Files\MiKTeX", @"C:\Users\Administrator\AppData\Local\Programs\MiKTeX"
-            })
+                @"C:\texlive", @"D:\texlive", @"E:\texlive", @"F:\texlive",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "MiKTeX"),
+                @"C:\Program Files\MiKTeX",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TinyTeX"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "Roaming", "TinyTeX"),
+            };
+
+            foreach (var root in roots)
             {
-                if (!Directory.Exists(baseDir)) continue;
-                try
-                {
-                    var found = Directory.GetFiles(baseDir, "latex.exe", SearchOption.AllDirectories).FirstOrDefault();
-                    if (found != null) return found;
-                }
-                catch { }
+                string hit = ProbeLatexUnder(root);
+                if (hit != null) return hit;
             }
+            return null;
+        }
+
+        /// <summary>在发行版根目录下按已知目录结构找 latex.exe（最多两层，不做递归）。</summary>
+        private static string ProbeLatexUnder(string root)
+        {
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return null;
+
+            // <root>/bin/windows/latex.exe（TinyTeX）
+            foreach (var bin in new[] { "windows", "win32" })
+            {
+                string direct = Path.Combine(root, "bin", bin, "latex.exe");
+                if (File.Exists(direct)) return direct;
+            }
+
+            // <root>/<year>/bin/<platform>/latex.exe（TeX Live）
+            try
+            {
+                foreach (var year in Directory.GetDirectories(root))
+                {
+                    foreach (var bin in new[] { "windows", "win32" })
+                    {
+                        string p = Path.Combine(year, "bin", bin, "latex.exe");
+                        if (File.Exists(p)) return p;
+                    }
+                    // <root>/<year>/bin/x64/latex.exe 之类
+                    string binDir = Path.Combine(year, "bin");
+                    if (Directory.Exists(binDir))
+                    {
+                        try
+                        {
+                            var found = Directory.GetFiles(binDir, "latex.exe", SearchOption.AllDirectories).FirstOrDefault();
+                            if (found != null) return found;
+                        }
+                        catch { }
+                    }
+                }
+
+                // MiKTeX：<root>/miktex/bin/x64/latex.exe
+                foreach (var sub in new[] { Path.Combine(root, "miktex", "bin"), Path.Combine(root, "bin") })
+                {
+                    if (!Directory.Exists(sub)) continue;
+                    try
+                    {
+                        var found = Directory.GetFiles(sub, "latex.exe", SearchOption.AllDirectories).FirstOrDefault();
+                        if (found != null) return found;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
             return null;
         }
 

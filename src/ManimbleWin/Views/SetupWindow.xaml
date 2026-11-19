@@ -142,6 +142,9 @@
                             Command="{Binding RefreshCommand}" IsEnabled="{Binding InstallEnabled}"/>
                     <Button Content="补装 LaTeX 宏包" Margin="8,0,0,0" Padding="10,5" FontSize="11"
                             Command="{Binding InstallTexPackagesCommand}" IsEnabled="{Binding InstallEnabled}"/>
+                    <CheckBox Content="用清华镜像加速 pip" Style="{StaticResource ThemedCheckBox}" Margin="14,0,0,0"
+                              VerticalAlignment="Center" IsChecked="{Binding UseMirror}" IsEnabled="{Binding InstallEnabled}"
+                              ToolTip="国内网络访问 PyPI 常常超时；取消后直接使用官方源（安装失败时会自动互相回退）"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Content="{Binding ContinueText}" Padding="16,7" FontSize="12"

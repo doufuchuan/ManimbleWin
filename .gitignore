@@ -36,3 +36,9 @@ engine/**/__pycache__/
 *.pyc
 .tmp/
 *.log
+
+## Runtime data / pip temp (默认写在 %LOCALAPPDATA%，受限环境会回落到项目内)
+.data/
+pip-build-tracker-*/
+pip-install-*/
+pip-ephem-wheel-cache-*/

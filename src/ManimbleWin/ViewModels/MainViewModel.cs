@@ -144,13 +144,21 @@ namespace ManimbleWin.ViewModels
         private bool _drawerVisible = true;
         public bool DrawerVisible { get => _drawerVisible; set => SetProperty(ref _drawerVisible, value); }
 
-        /// <summary>独立终端面板（覆盖画布区域），保证点“终端”一定能看到。</summary>
+        /// <summary>独立终端面板（停靠在中栏底部，画布自动让位）。</summary>
         private bool _terminalVisible;
         public bool TerminalVisible { get => _terminalVisible; set => SetProperty(ref _terminalVisible, value); }
 
-        /// <summary>打开终端面板：覆盖在画布上，占满中间列。</summary>
+        private System.Windows.GridLength _terminalHeight = new System.Windows.GridLength(240);
+        public System.Windows.GridLength TerminalHeight
+        {
+            get => _terminalHeight;
+            set => SetProperty(ref _terminalHeight, value);
+        }
+
+        /// <summary>打开终端面板：停靠在画布下方，不覆盖幻灯片。</summary>
         public void ShowTerminalPanel()
         {
+            if (TerminalHeight.Value < 120) TerminalHeight = new System.Windows.GridLength(240);
             TerminalVisible = true;
             ShowToast("终端已打开 · 输入 help 查看命令");
         }
@@ -716,8 +724,13 @@ namespace ManimbleWin.ViewModels
             // 关键：把对象操作写回 Python 源码，并同步到可编辑代码窗格
             if (CurrentSlide != null)
             {
+                // 引擎的 edit_source 需要「旧文本」来定位替换，必须在改动之前抓快照，
+                // 否则 expected 与 new 相同，引擎会判定源码不匹配而拒绝。
+                string before = CurrentSlide.Source;
+
+                if (string.IsNullOrEmpty(o.CodeId)) o.CodeId = SourceCodeGenerator.NewCodeId();
                 string line = SourceCodeGenerator.LineFor(o, SlideDisplayWidth / Zoom, SlideDisplayHeight / Zoom);
-                CurrentSlide.Source = SourceCodeGenerator.AppendLine(CurrentSlide.Source, line);
+                CurrentSlide.Source = SourceCodeGenerator.AppendLine(before, line);
                 o.SourceLine = CountLine(CurrentSlide.Source, line);
                 o.Loc = $"{CurrentSlide.File}:{o.SourceLine}";
                 RebuildSourceLines();
@@ -725,10 +738,7 @@ namespace ManimbleWin.ViewModels
                 SourceEditStatus = "代码已更新（待应用）";
                 // 引擎已连接：真正写回工作副本并重渲染
                 if (_engine != null && _engine.IsConnected)
-                {
-                    string expected = CurrentSlide.Source; // 简化：以当前内容为基准
-                    _ = _engine.ApplyTextEdit(CurrentSlide, expected, CurrentSlide.Source);
-                }
+                    _ = _engine.ApplyTextEdit(CurrentSlide, before, CurrentSlide.Source);
             }
             ShowToast($"已插入 {kind} · Python 代码已同步");
         }
@@ -770,7 +780,7 @@ namespace ManimbleWin.ViewModels
         private async void RenderFormulaObject(CanvasObject o)
         {
             if (o == null) return;
-            string tex = string.IsNullOrWhiteSpace(o.Value) ? o.DisplayText : o.Value;
+            string tex = LatexService.NormalizeTex(string.IsNullOrWhiteSpace(o.Value) ? o.DisplayText : o.Value);
             if (string.IsNullOrWhiteSpace(tex)) return;
             if (!LatexService.IsAvailable)
             {
@@ -819,6 +829,8 @@ namespace ManimbleWin.ViewModels
         public void InsertFormula(string tex)
         {
             if (CurrentBuild == null || string.IsNullOrWhiteSpace(tex)) return;
+            tex = LatexService.NormalizeTex(tex);
+            if (string.IsNullOrWhiteSpace(tex)) return;
             var o = new CanvasObject
             {
                 Kind = ObjectKind.Tex,
@@ -945,7 +957,7 @@ namespace ManimbleWin.ViewModels
                 case "DarkModeApp": IsDarkMode = !IsDarkMode; break;
                 case "InvertColors": ShowToast("反色 — 原型模式"); break;
                 case "ShowTerminal": ShowTerminalPanel(); break;
-                case "NewTerminal": ShowTerminalPanel(); ShowToast("已打开终端面板"); break;
+                case "NewTerminal": ShowTerminalPanel(); Terminal.ResetSession(); ShowToast("已新建终端会话"); break;
                 case "CloseTerminal": TerminalVisible = false; break;
                 case "ToggleNavigator": NavigatorVisible = !NavigatorVisible; break;
                 case "ToggleInspector": InspectorVisible = !InspectorVisible; break;

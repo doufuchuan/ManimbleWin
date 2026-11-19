@@ -77,6 +77,20 @@ namespace ManimbleWin.Services
 
         public static bool IsAvailable => !string.IsNullOrEmpty(LatexExe) && !string.IsNullOrEmpty(DvipngExe);
 
+        /// <summary>剥掉可能粘连的 Python 字符串外壳（r"x^2" → x^2），避免把 r" 当成公式内容。</summary>
+        public static string NormalizeTex(string tex)
+        {
+            string t = (tex ?? "").Trim();
+            if (t.Length == 0) return t;
+            var m = System.Text.RegularExpressions.Regex.Match(t, "^(?:[rR])?(?:\"([\\s\\S]*)\"|'([\\s\\S]*)')$");
+            if (m.Success)
+            {
+                string inner = m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value;
+                if (inner.Length > 0) return inner;
+            }
+            return t;
+        }
+
         /// <summary>把公式编译成 PNG，返回文件路径；失败抛 LatexException（含 TeX 日志尾部）。</summary>
         public static string Render(string tex, double fontSizePt = 48, string colorHex = "#FFFFFF", int dpi = 300)
         {
@@ -106,7 +120,7 @@ namespace ManimbleWin.Services
             string target = Path.Combine(CacheDir, key + ".png");
             if (File.Exists(target)) return target;
 
-            string work = Path.Combine(Path.GetTempPath(), "manimble-tex", key);
+            string work = Path.Combine(EnvironmentService.TempDir, "manimble-tex", key);
             Directory.CreateDirectory(work);
             string texFile = Path.Combine(work, "formula.tex");
             string dviFile = Path.Combine(work, "formula.dvi");
@@ -203,6 +217,7 @@ namespace ManimbleWin.Services
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
+                EnvironmentService.ApplyCleanTemp(psi);
                 using var p = Process.Start(psi);
                 var outTask = p.StandardOutput.ReadToEndAsync();
                 var errTask = p.StandardError.ReadToEndAsync();
