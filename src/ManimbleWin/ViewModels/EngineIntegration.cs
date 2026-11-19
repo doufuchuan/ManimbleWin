@@ -180,7 +180,7 @@ namespace ManimbleWin.ViewModels
                         int n = Math.Max(1, arr.Count);
                         for (int i = 0; i < n; i++)
                         {
-                            var b = new Build { Name = $"Build {i + 1}" };
+                            var b = new Build { Name = $"构建 {i + 1}" };
                             if (i < arr.Count)
                                 b.RenderedImage = GetStr(arr[i], "png") ?? "";
                             slide.Builds.Add(b);
@@ -293,6 +293,73 @@ namespace ManimbleWin.ViewModels
                 Say("公式渲染失败：" + ex.Message);
                 return null;
             }
+        }
+
+        /// <summary>把一段完整源码写回引擎工作副本（edit_source），成功后刷新该页真实渲染。</summary>
+        public async Task<bool> ApplyTextEdit(Slide slide, string expected, string text)
+        {
+            if (!IsConnected || slide == null) return false;
+            try
+            {
+                var r = await _engine.EditSource(slide.Name, slide.File, expected, text);
+                bool ok = !r.TryGetProperty("ok", out var okEl) || okEl.ValueKind != JsonValueKind.False;
+                if (!ok)
+                {
+                    string err = GetStr(r, "error") ?? "未知错误";
+                    Say("源码写回被拒绝：" + err);
+                    return false;
+                }
+                Say($"源码已写回并重新渲染：{slide.Name}");
+                await LoadSceneInto(slide);
+                return true;
+            }
+            catch (EngineException ex)
+            {
+                Say("源码写回失败：" + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>通过引擎插入一个对象（insert 命令），返回是否成功。</summary>
+        public async Task<bool> InsertViaEngine(Slide slide, int stop, string kind, object extra)
+        {
+            if (!IsConnected || slide == null) return false;
+            try
+            {
+                var r = await _engine.Insert(slide.Name, stop, kind, extra);
+                bool ok = !r.TryGetProperty("ok", out var okEl) || okEl.ValueKind != JsonValueKind.False;
+                if (ok) { Say($"已通过引擎插入 {kind}"); await LoadSceneInto(slide); }
+                else Say("插入失败：" + (GetStr(r, "error") ?? "未知错误"));
+                return ok;
+            }
+            catch (EngineException ex) { Say("插入失败：" + ex.Message); return false; }
+        }
+
+        /// <summary>构建并播放演示。片段路径由 present 事件回传。</summary>
+        public async Task<bool> Present(string scene = null)
+        {
+            if (!IsConnected) return false;
+            try
+            {
+                var r = await _engine.Present(scene);
+                bool ok = !r.TryGetProperty("ok", out var okEl) || okEl.ValueKind != JsonValueKind.False;
+                Say(ok ? "演示已生成" : ("演示失败：" + (GetStr(r, "error") ?? "")));
+                return ok;
+            }
+            catch (EngineException ex) { Say("演示失败：" + ex.Message); return false; }
+        }
+
+        /// <summary>导出影片到指定路径。</summary>
+        public async Task<string> ExportMovie(string path)
+        {
+            if (!IsConnected) return null;
+            try
+            {
+                var r = await _engine.ExportMovie(path);
+                bool ok = !r.TryGetProperty("ok", out var okEl) || okEl.ValueKind != JsonValueKind.False;
+                return ok ? path : null;
+            }
+            catch (EngineException ex) { Say("导出失败：" + ex.Message); return null; }
         }
 
         public void Shutdown()

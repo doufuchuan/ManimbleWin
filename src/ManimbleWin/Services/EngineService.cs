@@ -204,6 +204,38 @@ namespace ManimbleWin.Services
             return Request("sprite", args, 120000);
         }
 
+        /// <summary>把一段 Python 源码写回引擎工作副本并触发重渲染。expected 为编辑开始时的原文（用于冲突检测）。</summary>
+        public Task<JsonElement> EditSource(string scene, string file, string expected, string text)
+            => Request("edit_source", new { scene, file, expected, text }, 180000);
+
+        /// <summary>向当前场景插入一个对象（走引擎，自动写回 Python 并重渲染）。</summary>
+        public Task<JsonElement> Insert(string scene, int stop, string kind, object extra = null)
+        {
+            var args = new System.Collections.Generic.Dictionary<string, object>
+            {
+                ["scene"] = scene, ["stop"] = stop, ["kind"] = kind
+            };
+            if (extra != null)
+                foreach (var p in JsonSerializer.SerializeToElement(extra).EnumerateObject())
+                    args[p.Name] = JsonSerializer.Deserialize<object>(p.Value.GetRawText());
+            return Request("insert", args, 180000);
+        }
+
+        /// <summary>构建并发送演示/动画预览；播放片段通过 present 事件回传。</summary>
+        public Task<JsonElement> Present(string scene = null, int height = 720)
+            => Request("present", scene == null ? new { height } : new { scene, height }, 180000);
+
+        /// <summary>导出影片（MP4）。进度通过 export_movie 事件回传。</summary>
+        public Task<JsonElement> ExportMovie(string path, string[] scenes = null, int height = 720, double hold = 2, int fps = 30)
+        {
+            var args = new System.Collections.Generic.Dictionary<string, object>
+            {
+                ["path"] = path, ["height"] = height, ["hold"] = hold, ["fps"] = fps
+            };
+            if (scenes != null) args["scenes"] = scenes;
+            return Request("export_movie", args, 600000);
+        }
+
         public void Dispose()
         {
             _cts?.Cancel();

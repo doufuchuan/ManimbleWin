@@ -1,0 +1,92 @@
+<Window x:Class="ManimbleWin.Views.PreviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:ManimbleWin.ViewModels"
+        xmlns:conv="clr-namespace:ManimbleWin.Helpers"
+        Title="动画预览" Height="620"         Width="1100" MinHeight="420" MinWidth="700"
+        Background="#0A0A0A" WindowStartupLocation="CenterScreen" KeyDown="Window_KeyDown">
+    <Window.Resources>
+        <!-- 预览用的对象模板（无编辑 chrome，仅呈现） -->
+        <DataTemplate x:Key="PreviewText">
+            <TextBlock Text="{Binding DisplayText}" Foreground="{Binding Brush}" FontSize="{Binding FontSize}"
+                       FontFamily="{Binding FontFamilyName}" FontWeight="{Binding Bold, Converter={StaticResource BoolToFontWeight}}"
+                       FontStyle="{Binding Italic, Converter={StaticResource BoolToFontStyle}}"
+                       TextDecorations="{Binding Underline, Converter={StaticResource BoolToTextDecorations}}"/>
+        </DataTemplate>
+        <DataTemplate x:Key="PreviewTex">
+            <Grid>
+                <TextBlock Text="{Binding DisplayText}" Foreground="{Binding Brush}" FontSize="{Binding FontSize}"
+                           FontFamily="Cambria Math" FontStyle="Italic" Visibility="{Binding HasSprite, Converter={StaticResource InvBoolToVis}}"/>
+                <Image Source="{Binding SpritePath, Converter={StaticResource PathToImage}}" Stretch="Uniform"
+                       Visibility="{Binding HasSprite, Converter={StaticResource BoolToVis}}"/>
+            </Grid>
+        </DataTemplate>
+        <DataTemplate x:Key="PreviewShape">
+            <Border BorderBrush="{Binding Brush}" BorderThickness="3" Background="Transparent"/>
+        </DataTemplate>
+        <local:PreviewTemplateSelector xmlns:local="clr-namespace:ManimbleWin.Views"
+                                       x:Key="PreviewSelector" TextTemplate="{StaticResource PreviewText}"
+                                       TexTemplate="{StaticResource PreviewTex}" ShapeTemplate="{StaticResource PreviewShape}"/>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 幻灯片画面 16:9 -->
+        <Viewbox Grid.Row="0" Stretch="Uniform" Margin="24,20,24,10">
+            <Grid Width="1280" Height="720" Background="{Binding Current.Background, Converter={StaticResource StrBrush}}">
+                <!-- 引擎真实渲染帧 -->
+                <Image Source="{Binding Current.ImagePath, Converter={StaticResource PathToImage}}" Stretch="Uniform"
+                       Visibility="{Binding Current.HasRealImage, Converter={StaticResource BoolToVis}}"/>
+                <!-- 模拟对象帧（无真实 PNG 时） -->
+                <ItemsControl ItemsSource="{Binding Current.Objects}" ItemTemplateSelector="{StaticResource PreviewSelector}"
+                              Visibility="{Binding Current.HasRealImage, Converter={StaticResource InvBoolToVis}}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                            <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                            <Setter Property="Width" Value="{Binding Width}"/>
+                            <Setter Property="Height" Value="{Binding Height}"/>
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
+                </ItemsControl>
+                <TextBlock Text="{Binding Current.SlideName}" Foreground="{Binding Current.TextColor, Converter={StaticResource StrBrush}}"
+                           Opacity="0.15" FontSize="28" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="24"/>
+            </Grid>
+        </Viewbox>
+
+        <!-- 控制条 -->
+        <Border Grid.Row="1" Background="#161616" BorderThickness="0,1,0,0" BorderBrush="#2A2A2A" Padding="16,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="上一帧" Command="{Binding PrevCommand}" Foreground="#DDDDDD">
+                        <TextBlock Text="◀" FontSize="14"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolTextButton}" Command="{Binding PlayPauseCommand}" Height="30" Padding="10,2" Margin="4,0">
+                        <TextBlock Text="{Binding PlayLabel}" Foreground="#FF6C0C" FontSize="12"/>
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButton}" ToolTip="下一帧" Command="{Binding NextCommand}" Foreground="#DDDDDD">
+                        <TextBlock Text="▶" FontSize="14"/>
+                    </Button>
+                </StackPanel>
+                <TextBlock Grid.Column="1" Text="{Binding PositionText}" Foreground="#AAAAAA" FontFamily="Consolas" FontSize="12"
+                           VerticalAlignment="Center" Margin="12,0"/>
+                <Slider Grid.Column="2" Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}"
+                        VerticalAlignment="Center" IsHitTestVisible="False" Foreground="#FF6C0C"/>
+                <TextBlock Grid.Column="3" Text="ESC 退出" Foreground="#666666" FontSize="11" VerticalAlignment="Center" Margin="12,0,0,0"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

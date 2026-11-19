@@ -8,7 +8,12 @@ Manimble 的 **Windows（WPF）桌面版**：高度还原 macOS 版 Manimble 的
 
 - **真实 Manim 渲染**：内置 `engine/manimble`，WPF 启动 `python -m manimble.rpc` 子进程，按 `docs/developers/protocol.md` 的 JSON-lines 协议通信；画布显示引擎渲染出的真实帧（`state` / `scene`）。
 - **LaTeX 公式渲染**：公式对象通过引擎 `sprite` 命令（kind=tex）生成由 LaTeX 排版的真实 PNG。
-- **依赖检测与引导**：首次启动弹出环境准备向导，菜单 `Engine › Dependency Center` 随时可打开依赖中心，检测 Python / Manim / FFmpeg / LaTeX 状态并引导安装；Manim 栈可一键安装到项目独立虚拟环境。
+- **源码双向编辑**：右下角代码窗格可直接编辑当前页 Python 源码；点击“应用”（或 Ctrl+S）经引擎 `edit_source` 写回工作副本并重渲染，未连接引擎时保存到本地。
+- **对象操作写回代码**：插入文本/公式/形状/图片/表格等操作由 `SourceCodeGenerator` 翻译成 Manim 代码并同步到源码窗格；连接引擎时经 `insert` / `edit_source` 真正写回。
+- **动画预览**：`播放` 菜单可打开独立预览窗口，按 build 逐帧播放（真实引擎帧或本地对象帧），支持播放/暂停、上一帧/下一帧、进度，ESC 退出；连接引擎后走 `present` / `export_movie` 生成真实片段与 MP4。
+- **可交互终端**：底部抽屉的“终端”是可输入命令的真实终端（`help` / `slides` / `insert` / `render` / `play` / `connect` / `claude` 等），↑↓ 翻历史、回车执行。
+- **依赖检测与引导**：首次启动弹出环境准备向导，菜单 `引擎 › 依赖中心` 随时可打开，检测 Python / Manim / FFmpeg / LaTeX 状态并引导安装；Manim 栈可一键安装到项目独立虚拟环境。
+- **全中文界面**：菜单、工具栏、面板、提示均为中文（Python 代码、快捷键与 Manim/LaTeX 等专有名词保留原文）。
 - **原型交互保留**：未连接引擎时自动回退到本地示例数据，界面与全部点击交互仍可用，便于无 Python 环境时演示。
 
 ## 快速开始
@@ -45,7 +50,7 @@ dotnet run --project src/ManimbleWin/ManimbleWin.csproj
 
 ## 环境依赖（真实渲染）
 
-应用**首次启动会自动弹出“环境准备”向导**，检测并引导安装以下依赖；也可随时从菜单 `Engine › Dependency Center…` 打开依赖中心。
+应用**首次启动会自动弹出“环境准备”向导**，检测并引导安装以下依赖；也可随时从菜单 `引擎 › 依赖中心…` 打开依赖中心。
 
 | 依赖 | 用途 | 获取方式 |
 |---|---|---|
@@ -59,7 +64,7 @@ dotnet run --project src/ManimbleWin/ManimbleWin.csproj
 1. 首次启动向导会列出各项状态（✓ 就绪 / ✕ 未安装 / ! 版本或宏包不符）。
 2. 点击缺失项的“安装 / 修复”：Manim 会自动创建虚拟环境并安装全部 Python 依赖；Python/FFmpeg/LaTeX 会打开对应下载页。
 3. 装完点“重新检测”，全部核心项就绪后点“启动 Manimble”。
-4. 主窗口状态栏右侧的绿点表示引擎已连接；从菜单 `Engine › Connect Manim Engine` 可手动连接。
+4. 主窗口状态栏右侧的绿点表示引擎已连接；从菜单 `引擎 › 连接 Manim 引擎` 可手动连接。
 
 > 未安装任何依赖也能启动应用：此时使用内置示例数据（纯界面演示）。连接引擎后会加载 `samples/hello/deck` 并渲染真实帧。
 

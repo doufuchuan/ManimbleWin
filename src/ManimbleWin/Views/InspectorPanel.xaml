@@ -11,15 +11,15 @@
 
             <!-- 无选中：显示幻灯片信息与提示 -->
             <StackPanel Visibility="{Binding SelectedObject, Converter={StaticResource InvNullToVis}}">
-                <TextBlock Text="{Binding CurrentSlide.Name, StringFormat=Current slide: {0}}"
+                <TextBlock Text="{Binding CurrentSlide.Name, StringFormat=当前幻灯片: {0}}"
                            Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" Margin="0,4,0,10"/>
                 <Border Background="{DynamicResource CodeBackgroundBrush}" CornerRadius="6" Padding="10" BorderThickness="1" BorderBrush="{DynamicResource SeparatorBrush}">
                     <StackPanel>
-                        <TextBlock Text="Tips" Foreground="{DynamicResource AccentBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                        <TextBlock Text="• Click an object to select it" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"/>
-                        <TextBlock Text="• Drag to move; Shift-drag to snap" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"/>
-                        <TextBlock Text="• Double-click text to retype" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"/>
-                        <TextBlock Text="• Arrow keys nudge the selection" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap"/>
+                        <TextBlock Text="提示" Foreground="{DynamicResource AccentBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                        <TextBlock Text="• 单击对象以选中" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                        <TextBlock Text="• 拖动可移动；按住 Shift 拖动可吸附" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                        <TextBlock Text="• 双击文本可重新输入" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                        <TextBlock Text="• 方向键可微调选中对象" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
             </StackPanel>
@@ -32,23 +32,23 @@
                 </Border>
 
                 <!-- 内容 -->
-                <TextBlock Text="Content" Style="{StaticResource PanelHeader}"/>
+                <TextBlock Text="内容" Style="{StaticResource PanelHeader}"/>
                 <TextBox Text="{Binding SelectedObject.DisplayText, UpdateSourceTrigger=PropertyChanged}"
                          Style="{StaticResource FieldInput}" AcceptsReturn="True" Height="52" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
                 <!-- 外观 -->
-                <TextBlock Text="Appearance" Style="{StaticResource PanelHeader}"/>
+                <TextBlock Text="外观" Style="{StaticResource PanelHeader}"/>
                 <Grid Margin="0,0,0,8">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-                    <TextBlock Text="Color" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Grid.Row="0"/>
+                    <TextBlock Text="颜色" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Grid.Row="0"/>
                     <StackPanel Orientation="Horizontal" Grid.Row="0" Grid.Column="1" HorizontalAlignment="Right">
                         <Border Width="18" Height="18" CornerRadius="3" Background="{Binding SelectedObject.Color, Converter={StaticResource StrBrush}}" BorderThickness="1" BorderBrush="{DynamicResource SeparatorBrush}"/>
                         <TextBlock Text="{Binding SelectedObject.Color}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="6,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBlock Text="Font size" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Grid.Row="1" Margin="0,4,0,0"/>
+                    <TextBlock Text="字号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Grid.Row="1" Margin="0,4,0,0"/>
                     <TextBlock Text="{Binding SelectedObject.FontSize, StringFormat={}{0:0}}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="11" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Right" Margin="0,4,0,0"/>
-                    <TextBlock Text="Font" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Grid.Row="2" Margin="0,4,0,0"/>
+                    <TextBlock Text="字体" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Grid.Row="2" Margin="0,4,0,0"/>
                     <TextBlock Text="{Binding SelectedObject.Font}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="11" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Right" Margin="0,4,0,0"/>
                 </Grid>
 
@@ -67,20 +67,20 @@
                 <Border Style="{StaticResource Hairline}" Margin="0,2,0,10"/>
 
                 <!-- 位置与尺寸 -->
-                <TextBlock Text="Position &amp; size (frame px)" Style="{StaticResource PanelHeader}"/>
+                <TextBlock Text="位置与大小（画布像素）" Style="{StaticResource PanelHeader}"/>
                 <Grid Margin="0,0,0,8">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
                     <TextBox Text="{Binding SelectedObject.X, StringFormat={}{0:0}, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldInput}" Margin="0,0,3,3" ToolTip="X"/>
                     <TextBox Text="{Binding SelectedObject.Y, StringFormat={}{0:0}, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldInput}" Grid.Column="1" Margin="3,0,0,3" ToolTip="Y"/>
-                    <TextBox Text="{Binding SelectedObject.Width, StringFormat={}{0:0}, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldInput}" Grid.Row="1" Margin="0,3,3,3" ToolTip="Width"/>
-                    <TextBox Text="{Binding SelectedObject.Height, StringFormat={}{0:0}, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldInput}" Grid.Row="1" Grid.Column="1" Margin="3,3,0,3" ToolTip="Height"/>
+                    <TextBox Text="{Binding SelectedObject.Width, StringFormat={}{0:0}, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldInput}" Grid.Row="1" Margin="0,3,3,3" ToolTip="宽度"/>
+                    <TextBox Text="{Binding SelectedObject.Height, StringFormat={}{0:0}, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldInput}" Grid.Row="1" Grid.Column="1" Margin="3,3,0,3" ToolTip="高度"/>
                 </Grid>
 
                 <Border Style="{StaticResource Hairline}" Margin="0,2,0,10"/>
 
                 <!-- 代码位置 -->
-                <TextBlock Text="Source" Style="{StaticResource PanelHeader}"/>
+                <TextBlock Text="源码位置" Style="{StaticResource PanelHeader}"/>
                 <Border Background="{DynamicResource CodeBackgroundBrush}" CornerRadius="4" Padding="8,6" BorderThickness="1" BorderBrush="{DynamicResource SeparatorBrush}">
                     <TextBlock Text="{Binding SelectedObject.Loc}" Foreground="{DynamicResource WarmBrush}" FontFamily="Consolas" FontSize="11"/>
                 </Border>

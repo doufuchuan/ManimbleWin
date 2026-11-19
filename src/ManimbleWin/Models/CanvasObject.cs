@@ -69,12 +69,12 @@ namespace ManimbleWin.Models
             {
                 switch (Kind)
                 {
-                    case ObjectKind.Text: return "Text";
-                    case ObjectKind.Tex: return "Formula";
-                    case ObjectKind.Image: return "Image";
-                    case ObjectKind.Line: return "Line";
-                    case ObjectKind.Shape: return "Shape";
-                    case ObjectKind.Table: return "Table";
+                    case ObjectKind.Text: return "文本";
+                    case ObjectKind.Tex: return "公式";
+                    case ObjectKind.Image: return "图片";
+                    case ObjectKind.Line: return "线条";
+                    case ObjectKind.Shape: return "形状";
+                    case ObjectKind.Table: return "表格";
                     default: return Kind.ToString();
                 }
             }

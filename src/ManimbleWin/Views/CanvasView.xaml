@@ -218,7 +218,7 @@
                                 <Grid Width="{Binding Width}" Height="{Binding Height}">
                                     <Rectangle Stroke="{DynamicResource PlaceholderBrush}" StrokeThickness="1"
                                                StrokeDashArray="4,3" Fill="Transparent"/>
-                                    <TextBlock Text="Click to add text" Foreground="{DynamicResource PlaceholderBrush}"
+                                    <TextBlock Text="单击此处添加文本" Foreground="{DynamicResource PlaceholderBrush}"
                                                FontSize="20" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0"/>
                                 </Grid>
                             </DataTemplate>

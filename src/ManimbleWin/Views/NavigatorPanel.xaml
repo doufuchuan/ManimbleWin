@@ -33,12 +33,12 @@
                         <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,3,3,0"
                                 Background="#000000AA" CornerRadius="2" Padding="3,1"
                                 Visibility="{Binding Hidden, Converter={StaticResource BoolToVis}}">
-                            <TextBlock Text="hidden" Foreground="#FF6C0C" FontSize="8"/>
+                            <TextBlock Text="隐藏" Foreground="#FF6C0C" FontSize="8"/>
                         </Border>
                         <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="3,3,0,0"
                                 Background="#E5484D" CornerRadius="2" Padding="3,1"
                                 Visibility="{Binding Error, Converter={StaticResource BoolToVis}}">
-                            <TextBlock Text="error" Foreground="White" FontSize="8"/>
+                            <TextBlock Text="错误" Foreground="White" FontSize="8"/>
                         </Border>
                     </Grid>
                 </Border>
@@ -51,7 +51,7 @@
                                     BorderBrush="{DynamicResource SeparatorBrush}" Cursor="Hand"
                                     MouseLeftButtonUp="BuildThumb_Click" Tag="{Binding}">
                                 <Grid Height="32" Background="{DynamicResource ChromeBackgroundBrush}">
-                                    <TextBlock Text="build" Foreground="{DynamicResource TextSecondaryBrush}"
+                                    <TextBlock Text="构建" Foreground="{DynamicResource TextSecondaryBrush}"
                                                FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Grid>
                             </Border>
@@ -70,9 +70,9 @@
 
         <Border Grid.Row="0" Padding="12,10,10,8" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}">
             <Grid>
-                <TextBlock Text="Navigator" Style="{StaticResource PanelHeader}" Margin="0" VerticalAlignment="Center"/>
+                <TextBlock Text="导航器" Style="{StaticResource PanelHeader}" Margin="0" VerticalAlignment="Center"/>
                 <Button Style="{StaticResource ToolIconButton}" Width="24" Height="24"
-                        HorizontalAlignment="Right" ToolTip="New Slide"
+                        HorizontalAlignment="Right" ToolTip="新建幻灯片"
                         Command="{Binding DataContext.ToolbarCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                         CommandParameter="NewSlide">
                     <Path Data="{StaticResource Icon.Plus}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.6" Stretch="Uniform" Width="12" Height="12"/>

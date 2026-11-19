@@ -37,7 +37,7 @@ namespace ManimbleWin
                 case Key.Enter:
                     if (vm.SelectedObject != null)
                     {
-                        vm.ShowToast("Double-click / Enter to edit text — prototype");
+                        vm.ShowToast("双击或按 Enter 编辑文本 — 原型模式");
                         e.Handled = true;
                     }
                     break;

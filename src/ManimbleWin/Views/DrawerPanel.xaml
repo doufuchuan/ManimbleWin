@@ -13,17 +13,17 @@
         <Border Grid.Row="0" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}" Background="{DynamicResource BarBackgroundBrush}">
             <Grid>
                 <StackPanel Orientation="Horizontal" Margin="6,0,0,0">
-                    <RadioButton Content="Slide Notes" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
+                    <RadioButton Content="幻灯片备注" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
                                  IsChecked="{Binding SelectedDrawerTab, Converter={StaticResource IndexEq}, ConverterParameter=0, Mode=TwoWay}"/>
-                    <RadioButton Content="Build Notes" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
+                    <RadioButton Content="构建备注" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
                                  IsChecked="{Binding SelectedDrawerTab, Converter={StaticResource IndexEq}, ConverterParameter=1, Mode=TwoWay}"/>
-                    <RadioButton Content="Alt Text" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
+                    <RadioButton Content="替代文本" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
                                  IsChecked="{Binding SelectedDrawerTab, Converter={StaticResource IndexEq}, ConverterParameter=2, Mode=TwoWay}"/>
-                    <RadioButton Content="Terminal 1" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
+                    <RadioButton Content="终端 1" GroupName="DrawerTabs" Style="{StaticResource DrawerTabButton}"
                                  IsChecked="{Binding SelectedDrawerTab, Converter={StaticResource IndexEq}, ConverterParameter=3, Mode=TwoWay}"/>
                 </StackPanel>
                 <Button Style="{StaticResource ToolIconButton}" Width="26" Height="26" HorizontalAlignment="Right" Margin="0,0,6,0"
-                        ToolTip="Close drawer"
+                        ToolTip="关闭抽屉"
                         Command="{Binding ToolbarCommand}" CommandParameter="ToggleDrawer">
                     <Path Data="{StaticResource Icon.Close}" Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.5" Stretch="Uniform" Width="11" Height="11"/>
                 </Button>

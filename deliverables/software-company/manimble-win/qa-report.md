@@ -20,6 +20,11 @@
 | GitHub Actions 配置 | ✅ 已配置 — push/PR 构建，`v*` 标签自动 Release 附 exe 与安装包 |
 | 运行时启动 | ✅ 通过 — 进程正常启动，驻留内存约 120 MB，无崩溃 |
 | 静态资源一致性 | ✅ XAML 引用的所有 StaticResource / DynamicResource 键均已定义 |
+| 源码双向编辑 | ✅ 已实现 — `SourcePanel` 可编辑 + `ApplySourceEditCommand`，经引擎 `edit_source` 写回并重渲染，未连接时保存到本地；Ctrl+S 快捷应用 |
+| 对象操作写回代码 | ✅ 已实现 — `SourceCodeGenerator` 把插入的对象翻译为 Manim 代码并同步到源码窗格 + `Slide.Source` |
+| 动画/视频预览 | ✅ 已实现 — `PreviewWindow` + `PreviewViewModel` 逐帧播放（真实帧或本地对象帧），播放/暂停/进度/ESC；引擎侧 `present` / `export_movie` 命令已封装 |
+| 可交互终端 | ✅ 已实现 — `TerminalViewModel` 支持 help/slides/insert/render/play/connect/claude 等命令、历史 ↑↓、回车执行，替换原静态假终端 |
+| 界面中文化 | ✅ 已实现 — 菜单/工具栏/格式栏/检查器/导航器/抽屉/终端/预览/状态栏全部中文（代码、快捷键、专有名词保留） |
 
 ## 环境
 
@@ -64,10 +69,21 @@
 - 沙箱注意：受限环境注入的 `sitecustomize` 会因 `%TEMP%` 报非致命警告；应用已为所有子进程设置应用专属临时目录（`%LOCALAPPDATA%\ManimbleWin\tmp`）规避。
 - ⚠️ 未在本沙箱完成项：完整的 `pip install manim` 与 `scene`/`sprite` 真实渲染的端到端跑通。原因是本沙箱对 pip 构建子进程有系统性限制（sdist 构建隔离卡死、依赖解析子进程长时间无进展），并非项目缺陷。manim==0.21.0 及全部依赖已在 `engine/requirements.txt` 固化，应用内依赖中心可一键安装在正常 Windows 环境完成。协议兼容性、命令字段、数据映射均已对照原版 `docs/developers/protocol.md` 与源码核验。
 
+## 本轮补齐（用户反馈的四个问题）
+
+| # | 用户反馈 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | 不能预览视频 | `ShowAnimationsCommand` 只弹 Toast，无预览窗口 | 新增 `PreviewWindow`/`PreviewViewModel` 逐帧动画预览；`播放` 菜单改为真正打开预览；引擎 `present`/`export_movie` 已封装 |
+| 2 | 创建对象时 Python 代码不更新 | `InsertObject` 只改 `CurrentBuild.Objects`，未碰 `Slide.Source` | 新增 `SourceCodeGenerator`，插入时生成 Manim 代码追加到 `Slide.Source` 并同步源码窗格；引擎连接时经 `ApplyTextEdit` 写回 |
+| 3 | 不能编辑代码 | `SourcePanel` 用只读 `TextBlock`，点击处理为空 | 改为可编辑 `TextBox`（行号 + 编辑区），新增应用/还原命令，Ctrl+S 应用；经 `edit_source` 写回并重渲染 |
+| 4 | 终端打不开 | `TerminalView` 是写死的静态假终端，输入框无绑定、无命令逻辑 | 改为数据驱动的 `TerminalViewModel`：可输入命令、历史、执行（含真实引擎命令调用），标签可见时自动聚焦 |
+| 5 | 应用内英文 | 菜单/面板/提示文案为英文 | 全界面文案中文化 |
+
 ## 已知限制
 
-- 引擎侧"编辑写回（`edit`/`edit_source`）"尚未接入画布交互：本版以真实 `scene` 渲染帧替换画布显示，并提供真实公式渲染；对象拖动/文本编辑仍是本地交互，不回写 Python 源码。可在 `EngineIntegration` 基础上按协议逐步接入 `edit`。
+- 画布上"拖动对象位置/改字号"等细粒度编辑仍为本地交互；经"应用"按钮或对象插入会把整页源码写回引擎。逐对象 `edit` 协议（move/resize 的乐观编辑）尚未接入，可按协议在 `EngineIntegration` 基础上扩展。
 - `sprite` 渲染的公式 PNG 定位使用引擎返回的相对坐标的近似（显示于原对象框），像素级对齐可后续按 `x/y/w/h/cx/cy` 精调。
+- 动画预览的"本地对象帧"是简化渲染（文本/形状），像素级还原以引擎真实帧为准；连接引擎后 `scene` 的真实 PNG 会优先显示。
 - 未做单元测试工程：编译 + 静态一致性 + 引擎协议人工验证已覆盖主要路径；如需 NUnit/xUnit 可在有 VS 环境补充。
 - 视觉像素级还原度未通过截图最终确认（沙箱 GUI 启动受限）。
 

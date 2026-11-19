@@ -40,6 +40,7 @@ namespace ManimbleWin.ViewModels
                     RaisePropertyChanged(nameof(UseRealRender));
                     RaisePropertyChanged(nameof(StatusBarText));
                     RebuildSourceLines();
+                    SyncSourceText();
                     // 引擎已连接时，切换幻灯片后加载该场景的真实渲染帧
                     bool alreadyRendered = value.CurrentBuild != null && value.CurrentBuild.HasRealRender;
                     if (_engine != null && _engine.IsConnected && !alreadyRendered)
@@ -67,6 +68,13 @@ namespace ManimbleWin.ViewModels
                 });
                 i++;
             }
+        }
+
+        /// <summary>把当前页源码同步到可编辑文本框（切页/引擎刷新时调用）。</summary>
+        private void SyncSourceText()
+        {
+            SourceText = CurrentSlide?.Source ?? "";
+            SourceEditStatus = "已保存";
         }
 
         private static Brush ClassifyLine(string line)
@@ -193,8 +201,8 @@ namespace ManimbleWin.ViewModels
         public bool BusyVisible => !string.IsNullOrEmpty(BusyText);
 
         public string StatusBarText => CurrentSlide == null
-            ? "No deck loaded"
-            : $"Deck: hello   ·   {CurrentSlide.Number}/{Slides.Count}   ·   Build {CurrentSlide.CurrentBuildIndex + 1}/{CurrentSlide.Builds.Count}   ·   {CurrentObjects?.Count ?? 0} objects";
+            ? "未加载演示文稿"
+            : $"演示文稿: hello   ·   第 {CurrentSlide.Number}/{Slides.Count} 页   ·   构建 {CurrentSlide.CurrentBuildIndex + 1}/{CurrentSlide.Builds.Count}   ·   {CurrentObjects?.Count ?? 0} 个对象";
 
         // 画布标尺刻度（设计坐标 1280 宽，每 100 一大格）
         public ObservableCollection<RulerMark> RulerMarks { get; } = BuildRulerMarks();
@@ -249,6 +257,40 @@ namespace ManimbleWin.ViewModels
 
         #endregion
 
+        #region 源码编辑 / 预览 / 终端
+
+        /// <summary>可编辑的当前页 Python 源码（与 SourcePanel 双向绑定）。</summary>
+        private string _sourceText = "";
+        public string SourceText
+        {
+            get => _sourceText;
+            set
+            {
+                if (SetProperty(ref _sourceText, value))
+                {
+                    int n = string.IsNullOrEmpty(value) ? 0 : value.Split('\n').Length;
+                    SourceLineNumbers = string.Join("\n", Enumerable.Range(1, n));
+                }
+            }
+        }
+        private string _sourceLineNumbers = "1";
+        public string SourceLineNumbers { get => _sourceLineNumbers; set => SetProperty(ref _sourceLineNumbers, value); }
+
+        private string _sourceEditStatus = "";
+        public string SourceEditStatus { get => _sourceEditStatus; set => SetProperty(ref _sourceEditStatus, value); }
+
+        public ICommand ApplySourceEditCommand { get; }
+        public ICommand RevertSourceEditCommand { get; }
+        public ICommand OpenPreviewCommand { get; }
+
+        /// <summary>交互式终端视图模型。</summary>
+        public TerminalViewModel Terminal { get; }
+
+        /// <summary>当前 deck 所在文件夹（终端 pwd 用）。</summary>
+        public string DeckFolder => EnvironmentService.SampleDeck;
+
+        #endregion
+
         #region 抽屉（备注 / 替代文本 / 终端）
 
         public ObservableCollection<string> DrawerTabs { get; } = new ObservableCollection<string>
@@ -296,7 +338,7 @@ namespace ManimbleWin.ViewModels
         {
             MenuCommand = new RelayCommand(p => ExecuteMenu(p?.ToString() ?? ""));
             ToolbarCommand = new RelayCommand(p => ExecuteToolbar(p?.ToString() ?? ""));
-            SelectSlideCommand = new RelayCommand(p => { if (p is Slide s) { CurrentSlide = s; ShowToast($"Selected slide: {s.Name}"); } });
+            SelectSlideCommand = new RelayCommand(p => { if (p is Slide s) { CurrentSlide = s; ShowToast($"已选择幻灯片：{s.Name}"); } });
             SelectBuildCommand = new RelayCommand(p =>
             {
                 if (p is BuildTag tag && tag.Slide != null)
@@ -305,16 +347,20 @@ namespace ManimbleWin.ViewModels
                     tag.Slide.CurrentBuildIndex = tag.Index;
                     RaisePropertyChanged(nameof(CurrentBuild));
                     RaisePropertyChanged(nameof(CurrentObjects));
-                    ShowToast($"Showing build {tag.Index + 1} of {tag.Slide.Name}");
+                    ShowToast($"正在显示 {tag.Slide.Name} 的构建 {tag.Index + 1}");
                 }
             });
             SelectObjectCommand = new RelayCommand(p => { if (p is CanvasObject o) SelectedObject = o; });
             SetThemeCommand = new RelayCommand(p => { if (p is DeckTheme t) ApplyTheme(t); });
             NudgeCommand = new RelayCommand(p => Nudge(p?.ToString() ?? ""));
-            OpenFindCommand = new RelayCommand(_ => { ShowToast("Find & Replace — prototype"); });
+            OpenFindCommand = new RelayCommand(_ => { ShowToast("查找和替换 — 原型模式"); });
             ConnectEngineCommand = new RelayCommand(_ => _ = ConnectEngine());
             OpenDependencyCenterCommand = new RelayCommand(_ => OpenDependencyCenter(false));
             RenderFormulaCommand = new RelayCommand(p => _ = RenderFormulaInteractive(p?.ToString()));
+            ApplySourceEditCommand = new RelayCommand(_ => ApplySourceEdit());
+            RevertSourceEditCommand = new RelayCommand(_ => RevertSourceEdit());
+            OpenPreviewCommand = new RelayCommand(_ => OpenPreview());
+            Terminal = new TerminalViewModel(this);
 
             BuildThemes();
             BuildSampleDeck();
@@ -373,11 +419,11 @@ namespace ManimbleWin.ViewModels
         VGroup(title, rule, subtitle).arrange(DOWN, buff=0.35)
         self.play(FadeIn(title), Create(rule), FadeIn(subtitle), run_time=0.8)");
             var wb = welcome.Builds[0];
-            wb.Objects.Add(Txt("Hello, Manimble", 340, 250, 600, 90, 56, "#FFFFFF", 3, true));
+            wb.Objects.Add(Txt("你好，Manimble", 340, 250, 600, 90, 56, "#FFFFFF", 3, true));
             wb.Objects.Add(new CanvasObject { Kind = ObjectKind.Shape, ShapeLabel = "Line", X = 470, Y = 352, Width = 340, Height = 3, Color = "#7C5CFF", SourceLine = 5 });
-            wb.Objects.Add(Txt("Edit slides by clicking them", 400, 380, 480, 50, 28, "#9AA0A6", 4));
-            welcome.AltText = "A title slide reading Hello, Manimble with a subtitle Edit slides by clicking them.";
-            wb.Notes = "Welcome to the demo deck. Every slide here is Python code.";
+            wb.Objects.Add(Txt("单击幻灯片即可编辑", 400, 380, 480, 50, 28, "#9AA0A6", 4));
+            welcome.AltText = "标题页“你好，Manimble”，副标题为“单击幻灯片即可编辑”。";
+            wb.Notes = "欢迎体验演示文稿，这里的每一页都是 Python 代码。";
 
             // ---- Slide 2: Shapes ----
             var shapes = NewSlide("Shapes", 2,
@@ -390,12 +436,12 @@ namespace ManimbleWin.ViewModels
         caption = label(""drag, resize, retype"", 26, GREY_B).move_to((0, -2.4, 0))
         self.add(heading, box, circle, arrow, caption)");
             var sb = shapes.Builds[0];
-            sb.Objects.Add(Txt("Shapes, lines and text", 60, 40, 520, 56, 40, "#FFFFFF", 2, true));
+            sb.Objects.Add(Txt("形状、线条与文本", 60, 40, 520, 56, 40, "#FFFFFF", 2, true));
             sb.Objects.Add(new CanvasObject { Kind = ObjectKind.Shape, ShapeLabel = "Rectangle", X = 90, Y = 250, Width = 230, Height = 150, Color = "#7C5CFF", SourceLine = 3 });
             sb.Objects.Add(new CanvasObject { Kind = ObjectKind.Shape, ShapeLabel = "Circle", X = 900, Y = 250, Width = 150, Height = 150, Color = "#FF9F0A", SourceLine = 4 });
             sb.Objects.Add(new CanvasObject { Kind = ObjectKind.Shape, ShapeLabel = "Arrow", X = 360, Y = 320, Width = 480, Height = 3, Color = "#FFFFFF", SourceLine = 5 });
-            sb.Objects.Add(Txt("drag, resize, retype", 480, 470, 340, 40, 26, "#9AA0A6", 6));
-            shapes.AltText = "Shapes slide with a purple rectangle, an orange circle, and a white arrow.";
+            sb.Objects.Add(Txt("拖动、缩放、改字", 480, 470, 340, 40, 26, "#9AA0A6", 6));
+            shapes.AltText = "形状页面：紫色矩形、橙色圆形和白色箭头。";
 
             // ---- Slide 3: Formula (三个 build) ----
             var formula = NewSlide("Formula", 3,
@@ -413,21 +459,21 @@ namespace ManimbleWin.ViewModels
         table = MathTable([[1, 2, 3], [4, 5, 6]], include_outer_lines=True).scale(0.6).move_to((0, -3.0, 0))
         self.play(FadeIn(table), run_time=0.5)");
             var f0 = formula.Builds[0];
-            f0.Objects.Add(Txt("A formula, in builds", 60, 40, 520, 56, 40, "#FFFFFF", 2, true));
+            f0.Objects.Add(Txt("逐步呈现的公式", 60, 40, 520, 56, 40, "#FFFFFF", 2, true));
             f0.Objects.Add(new CanvasObject { Kind = ObjectKind.Tex, Value = @"e^{i\pi}+1=0", DisplayText = "e^iπ + 1 = 0", X = 380, Y = 240, Width = 520, Height = 110, FontSize = 72, Color = "#FFFFFF", SourceLine = 3, Italic = true });
-            f0.Notes = "Euler's identity, shown one build at a time.";
+            f0.Notes = "欧拉恒等式，逐步呈现。";
 
-            var f1 = new Build { Name = "Build 2" };
-            f1.Objects.Add(Txt("A formula, in builds", 60, 40, 520, 56, 40, "#FFFFFF", 2, true));
+            var f1 = new Build { Name = "构建 2" };
+            f1.Objects.Add(Txt("逐步呈现的公式", 60, 40, 520, 56, 40, "#FFFFFF", 2, true));
             f1.Objects.Add(new CanvasObject { Kind = ObjectKind.Tex, Value = @"e^{i\pi}+1=0", DisplayText = "e^iπ + 1 = 0", X = 380, Y = 200, Width = 520, Height = 110, FontSize = 72, Color = "#FFFFFF", SourceLine = 3, Italic = true });
-            f1.Objects.Add(Txt("Double-click the formula to edit its LaTeX", 300, 360, 620, 40, 26, "#9AA0A6", 7));
-            f1.BuildNotes = "This note appears in build 2.";
+            f1.Objects.Add(Txt("双击公式可编辑其 LaTeX", 300, 360, 620, 40, 26, "#9AA0A6", 7));
+            f1.BuildNotes = "此备注出现在构建 2 中。";
             formula.Builds.Add(f1);
 
-            var f2 = new Build { Name = "Build 3" };
-            f2.Objects.Add(Txt("A formula, in builds", 60, 40, 520, 56, 40, "#FFFFFF", 2, true));
+            var f2 = new Build { Name = "构建 3" };
+            f2.Objects.Add(Txt("逐步呈现的公式", 60, 40, 520, 56, 40, "#FFFFFF", 2, true));
             f2.Objects.Add(new CanvasObject { Kind = ObjectKind.Table, DisplayText = "1 2 3 / 4 5 6", X = 470, Y = 200, Width = 340, Height = 180, Color = "#FFFFFF", SourceLine = 11 });
-            f2.BuildNotes = "Final build adds a MathTable.";
+            f2.BuildNotes = "最后一个构建添加了数学表格。";
             formula.Builds.Add(f2);
 
             Slides.Add(welcome);
@@ -438,7 +484,7 @@ namespace ManimbleWin.ViewModels
         private Slide NewSlide(string name, int number, string source)
         {
             var s = new Slide { Name = name, Number = number, Source = source };
-            s.Builds.Add(new Build { Name = "Build 1" });
+            s.Builds.Add(new Build { Name = "构建 1" });
             return s;
         }
 
@@ -449,7 +495,7 @@ namespace ManimbleWin.ViewModels
         private void ApplyTheme(DeckTheme t)
         {
             CurrentTheme = t;
-            ShowToast($"Theme applied: {t.Name}");
+            ShowToast($"已应用主题：{t.Name}");
         }
 
         private void Nudge(string dir)
@@ -482,14 +528,14 @@ namespace ManimbleWin.ViewModels
             {
                 case "NewSlide": NewSlideFromToolbar(); break;
                 case "NewBuild": NewBuild(); break;
-                case "ExpandAll": ShowToast("Expanded all builds in navigator"); break;
-                case "Theme": ShowToast("Theme menu (choose a swatch in the toolbar)"); break;
-                case "DarkMode": IsDarkMode = !IsDarkMode; ShowToast(IsDarkMode ? "Dark mode on" : "Dark mode off"); break;
-                case "Terminal": DrawerVisible = true; SelectedDrawerTab = 3; ShowToast("Terminal shown"); break;
+                case "ExpandAll": ShowToast("已展开导航器中的所有构建"); break;
+                case "Theme": ShowToast("主题菜单（在工具栏选择色块）"); break;
+                case "DarkMode": IsDarkMode = !IsDarkMode; ShowToast(IsDarkMode ? "深色模式已开启" : "深色模式已关闭"); break;
+                case "Terminal": DrawerVisible = true; SelectedDrawerTab = 3; ShowToast("终端已显示"); break;
                 case "ZoomIn": Zoom += 0.1; break;
                 case "ZoomOut": Zoom -= 0.1; break;
                 case "ZoomFit": Zoom = 0.72; break;
-                case "Share": ShowToast("Export / Share — prototype"); break;
+                case "Share": ShowToast("导出 / 分享 — 原型模式"); break;
                 case "ToggleDrawer": DrawerVisible = !DrawerVisible; break;
                 case "ToggleNavigator": NavigatorVisible = !NavigatorVisible; break;
                 case "ToggleInspector": InspectorVisible = !InspectorVisible; break;
@@ -500,17 +546,17 @@ namespace ManimbleWin.ViewModels
         private void NewSlideFromToolbar()
         {
             int n = Slides.Count + 1;
-            var s = NewSlide("Slide " + n, n, $"class Slide{n}(Deck):\n    def construct(self):\n        pass  # manimble new slide");
-            s.Builds[0].Objects.Add(Txt("Click to add title", 340, 260, 600, 70, 44, "#7A7A7A", 2));
+            var s = NewSlide("Slide " + n, n, $"class Slide{n}(Deck):\n    def construct(self):\n        pass  # manimble 新建幻灯片");
+            s.Builds[0].Objects.Add(Txt("单击此处添加标题", 340, 260, 600, 70, 44, "#7A7A7A", 2));
             Slides.Add(s);
             CurrentSlide = s;
-            ShowToast("New slide added");
+            ShowToast("已新建幻灯片");
         }
 
         private void NewBuild()
         {
             if (CurrentSlide == null) return;
-            var b = new Build { Name = "Build " + (CurrentSlide.Builds.Count + 1) };
+            var b = new Build { Name = "构建 " + (CurrentSlide.Builds.Count + 1) };
             foreach (var o in CurrentSlide.Builds.Last().Objects)
             {
                 var c = o.Clone(); c.IsSelected = false; b.Objects.Add(c);
@@ -519,7 +565,7 @@ namespace ManimbleWin.ViewModels
             CurrentSlide.CurrentBuildIndex = CurrentSlide.Builds.Count - 1;
             RaisePropertyChanged(nameof(CurrentBuild));
             RaisePropertyChanged(nameof(CurrentObjects));
-            ShowToast("New build added");
+            ShowToast("已新建构建");
         }
 
         private void InsertObject(string kind)
@@ -537,7 +583,34 @@ namespace ManimbleWin.ViewModels
             o.Z = CurrentBuild.Objects.Count;
             CurrentBuild.Objects.Add(o);
             SelectedObject = o;
-            ShowToast($"Inserted {kind}");
+
+            // 关键：把对象操作写回 Python 源码，并同步到可编辑代码窗格
+            if (CurrentSlide != null)
+            {
+                string line = SourceCodeGenerator.LineFor(o, SlideDisplayWidth / Zoom, SlideDisplayHeight / Zoom);
+                CurrentSlide.Source = SourceCodeGenerator.AppendLine(CurrentSlide.Source, line);
+                o.SourceLine = CountLine(CurrentSlide.Source, line);
+                o.Loc = $"{CurrentSlide.File}:{o.SourceLine}";
+                RebuildSourceLines();
+                SyncSourceText();
+                SourceEditStatus = "代码已更新（待应用）";
+                // 引擎已连接：真正写回工作副本并重渲染
+                if (_engine != null && _engine.IsConnected)
+                {
+                    string expected = CurrentSlide.Source; // 简化：以当前内容为基准
+                    _ = _engine.ApplyTextEdit(CurrentSlide, expected, CurrentSlide.Source);
+                }
+            }
+            ShowToast($"已插入 {kind} · Python 代码已同步");
+        }
+
+        private static int CountLine(string source, string line)
+        {
+            if (string.IsNullOrEmpty(source)) return 1;
+            var lines = source.Split('\n');
+            for (int i = lines.Length - 1; i >= 0; i--)
+                if (lines[i].Contains(line)) return i + 1;
+            return lines.Length;
         }
 
         private void DuplicateSlide()
@@ -558,17 +631,17 @@ namespace ManimbleWin.ViewModels
             }
             Slides.Add(copy);
             CurrentSlide = copy;
-            ShowToast("Slide duplicated");
+            ShowToast("幻灯片已复制");
         }
 
         private void DeleteSlide()
         {
-            if (CurrentSlide == null || Slides.Count <= 1) { ShowToast("Cannot delete the last slide"); return; }
+            if (CurrentSlide == null || Slides.Count <= 1) { ShowToast("不能删除最后一页幻灯片"); return; }
             int idx = Slides.IndexOf(CurrentSlide);
             Slides.Remove(CurrentSlide);
             CurrentSlide = Slides[Math.Min(idx, Slides.Count - 1)];
             for (int i = 0; i < Slides.Count; i++) Slides[i].Number = i + 1;
-            ShowToast("Slide deleted");
+            ShowToast("幻灯片已删除");
         }
 
         private void ExecuteMenu(string action)
@@ -577,14 +650,14 @@ namespace ManimbleWin.ViewModels
             // open/state/scene/edit/insert/slide/notes/undo/redo/present/export...
             switch (action)
             {
-                case "NewDeck": ShowToast("File ▸ New Deck… — prototype"); break;
-                case "OpenDeck": ShowToast("File ▸ Open Deck or Project… — prototype"); break;
-                case "Save": ShowToast("Saved to original (simulated)"); break;
+                case "NewDeck": ShowToast("文件 ▸ 新建演示文稿… — 原型模式"); break;
+                case "OpenDeck": ShowToast("文件 ▸ 打开演示文稿或项目… — 原型模式"); break;
+                case "Save": ShowToast("已保存到原始文件（模拟）"); break;
                 case "Close": Application.Current.MainWindow?.Close(); break;
                 case "Quit": Application.Current.Shutdown(); break;
 
-                case "Undo": ShowToast("Undo — prototype"); break;
-                case "Redo": ShowToast("Redo — prototype"); break;
+                case "Undo": ShowToast("撤销 — 原型模式"); break;
+                case "Redo": ShowToast("重做 — 原型模式"); break;
                 case "Cut":
                 case "DeleteSelected":
                     if (SelectedObject != null)
@@ -592,40 +665,40 @@ namespace ManimbleWin.ViewModels
                         var target = SelectedObject;
                         SelectedObject = null;
                         if (CurrentBuild != null) CurrentBuild.Objects.Remove(target);
-                        ShowToast("Object deleted");
+                        ShowToast("对象已删除");
                     }
                     break;
-                case "Copy": ShowToast("Copy — prototype"); break;
+                case "Copy": ShowToast("复制 — 原型模式"); break;
                 case "Paste": InsertObject("Text"); break;
-                case "SelectAll": ShowToast("Select All — prototype"); break;
+                case "SelectAll": ShowToast("全选 — 原型模式"); break;
                 case "Find": OpenFindCommand.Execute(null); break;
-                case "Replace": ShowToast("Find and Replace — prototype"); break;
+                case "Replace": ShowToast("查找和替换 — 原型模式"); break;
 
                 case "InsertText": InsertObject("Text"); break;
                 case "InsertFormula": InsertObject("Formula"); break;
                 case "InsertImage": InsertObject("Image"); break;
                 case "InsertTable": InsertObject("Table"); break;
                 case "InsertShape": InsertObject("Rectangle"); break;
-                case "InsertPen": ShowToast("Draw ▸ Pen — prototype"); break;
+                case "InsertPen": ShowToast("绘制 ▸ 画笔 — 原型模式"); break;
 
                 case "NewSlide": NewSlideFromToolbar(); break;
                 case "DuplicateSlide": DuplicateSlide(); break;
                 case "DeleteSlide": DeleteSlide(); break;
-                case "HideSlide": if (CurrentSlide != null) { CurrentSlide.Hidden = !CurrentSlide.Hidden; ShowToast(CurrentSlide.Hidden ? "Slide hidden" : "Slide unhidden"); } break;
+                case "HideSlide": if (CurrentSlide != null) { CurrentSlide.Hidden = !CurrentSlide.Hidden; ShowToast(CurrentSlide.Hidden ? "幻灯片已隐藏" : "幻灯片已显示"); } break;
                 case "MoveSlideUp": MoveSlide(-1); break;
                 case "MoveSlideDown": MoveSlide(1); break;
 
                 case "Bold": ToggleFormat("Bold"); break;
                 case "Italic": ToggleFormat("Italic"); break;
                 case "Underline": ToggleFormat("Underline"); break;
-                case "Theme": ShowToast("Format ▸ Theme — use the Theme swatches"); break;
-                case "AlignLeft": ShowToast("Align Left"); break;
-                case "AlignCenter": ShowToast("Align Center"); break;
-                case "AlignRight": ShowToast("Align Right"); break;
+                case "Theme": ShowToast("格式 ▸ 主题 — 请在工具栏选择色块"); break;
+                case "AlignLeft": ShowToast("左对齐"); break;
+                case "AlignCenter": ShowToast("居中对齐"); break;
+                case "AlignRight": ShowToast("右对齐"); break;
 
-                case "Front": ShowToast("Bring to Front"); break;
-                case "Group": ShowToast("Group — prototype"); break;
-                case "Ungroup": ShowToast("Ungroup — prototype"); break;
+                case "Front": ShowToast("置于顶层"); break;
+                case "Group": ShowToast("组合 — 原型模式"); break;
+                case "Ungroup": ShowToast("取消组合 — 原型模式"); break;
 
                 case "GridLines": ShowGrid = !ShowGrid; break;
                 case "Ruler": ShowRuler = !ShowRuler; break;
@@ -633,28 +706,28 @@ namespace ManimbleWin.ViewModels
                 case "ShowObjects": ShowObjects = !ShowObjects; break;
                 case "SpeakerNotes": DrawerVisible = true; SelectedDrawerTab = 0; break;
                 case "DarkModeApp": IsDarkMode = !IsDarkMode; break;
-                case "InvertColors": ShowToast("Invert Colors — prototype"); break;
+                case "InvertColors": ShowToast("反色 — 原型模式"); break;
                 case "ShowTerminal": DrawerVisible = true; SelectedDrawerTab = 3; break;
-                case "NewTerminal": if (DrawerTabs.Count < 6) { DrawerTabs.Add("Terminal " + (DrawerTabs.Count - 2)); SelectedDrawerTab = DrawerTabs.Count - 1; ShowToast("New terminal tab"); } break;
+                case "NewTerminal": if (DrawerTabs.Count < 6) { DrawerTabs.Add("Terminal " + (DrawerTabs.Count - 2)); SelectedDrawerTab = DrawerTabs.Count - 1; ShowToast("已新建终端标签"); } break;
                 case "ToggleNavigator": NavigatorVisible = !NavigatorVisible; break;
                 case "ToggleInspector": InspectorVisible = !InspectorVisible; break;
 
-                case "PlayFromBeginning": ShowAnimationsCommand("beginning"); break;
-                case "PlayFromCurrent": ShowAnimationsCommand("current"); break;
-                case "Presenter": ShowToast("Presenter View — prototype"); break;
-                case "PreviewAnimation": ShowToast("Preview Current Slide's Animations — prototype"); break;
+                case "PlayFromBeginning": OpenPreview(0); break;
+                case "PlayFromCurrent": OpenPreview(); break;
+                case "Presenter": OpenPreview(); break;
+                case "PreviewAnimation": OpenPreviewCurrentOnly(); break;
 
-                case "Docs": ShowToast("Documentation: pachterlab.github.io/Manimble"); break;
-                case "About": ShowToast("ManimbleWin — UI prototype 0.4.7"); break;
+                case "Docs": ShowToast("文档：pachterlab.github.io/Manimble"); break;
+                case "About": ShowToast("ManimbleWin — 界面原型 0.5.0"); break;
                 case "Insert": InsertObject("Text"); break;
-                default: if (!string.IsNullOrEmpty(action)) ShowToast(action + " — prototype"); break;
+                default: if (!string.IsNullOrEmpty(action)) ShowToast(action + " — 原型模式"); break;
             }
         }
 
         private void ShowAnimationsCommand(string where)
         {
             BusyText = "Building animations 0/3";
-            ShowToast("Play from " + where + " — prototype");
+            ShowToast("从" + (where == "beginning" ? "开头" : "当前页") + "播放 — 原型模式");
             // 原型：短暂显示忙碌指示后清除
             var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1400) };
             timer.Tick += (s, e) => { BusyText = ""; timer.Stop(); };
@@ -669,19 +742,19 @@ namespace ManimbleWin.ViewModels
             if (j < 0 || j >= Slides.Count) return;
             Slides.Move(i, j);
             for (int k = 0; k < Slides.Count; k++) Slides[k].Number = k + 1;
-            ShowToast("Slide moved");
+            ShowToast("幻灯片已移动");
         }
 
         private void ToggleFormat(string prop)
         {
-            if (SelectedObject == null) { ShowToast("Select a text object first"); return; }
+            if (SelectedObject == null) { ShowToast("请先选择一个文本对象"); return; }
             switch (prop)
             {
                 case "Bold": SelectedObject.Bold = !SelectedObject.Bold; break;
                 case "Italic": SelectedObject.Italic = !SelectedObject.Italic; break;
                 case "Underline": SelectedObject.Underline = !SelectedObject.Underline; break;
             }
-            ShowToast(prop + " toggled");
+            ShowToast(prop + " 已切换");
         }
 
         #endregion
@@ -731,6 +804,111 @@ namespace ManimbleWin.ViewModels
                     _ = ConnectEngine();
             }
         }
+
+        #region 源码编辑 / 预览 / 终端桥接
+
+        /// <summary>应用代码窗格的修改：更新本地源码 → 写回引擎（若连接）→ 刷新源码窗格。</summary>
+        private async void ApplySourceEdit()
+        {
+            if (CurrentSlide == null) return;
+            string edited = SourceText ?? "";
+            string before = CurrentSlide.Source;
+            CurrentSlide.Source = edited;
+            RebuildSourceLines();
+            SourceEditStatus = "正在应用…";
+
+            if (_engine != null && _engine.IsConnected)
+            {
+                bool ok = await _engine.ApplyTextEdit(CurrentSlide, before, edited);
+                SourceEditStatus = ok ? "已应用并重新渲染" : "已保存到本地（引擎校验未通过）";
+                ShowToast(ok ? "代码已应用，画布已重新渲染" : "代码已保存到本地；语法或渲染错误，请检查");
+            }
+            else
+            {
+                SourceEditStatus = "已保存（本地）";
+                ShowToast("代码已更新；连接引擎后可重新渲染验证");
+            }
+        }
+
+        private void RevertSourceEdit()
+        {
+            SyncSourceText();
+            ShowToast("已还原为上次保存的源码");
+        }
+
+        /// <summary>打开动画预览窗口。startIndex 为起始幻灯片索引（-1 表示当前页）。</summary>
+        private void OpenPreview(int startIndex = -1)
+        {
+            var vm = new PreviewViewModel(this, startIndex);
+            var win = new Views.PreviewWindow(vm) { Owner = Application.Current?.MainWindow };
+            win.Show();
+        }
+
+        private void OpenPreviewCurrentOnly()
+        {
+            var vm = new PreviewViewModel(this, -1) { OnlyCurrent = true };
+            var win = new Views.PreviewWindow(vm) { Owner = Application.Current?.MainWindow };
+            win.Show();
+        }
+
+        // ---- 终端桥接方法 ----
+        public void ConnectFromTerminal() => _ = ConnectEngine();
+
+        public void RenderFormulaFromTerminal(string tex, Action<bool, string> report)
+        {
+            _ = Task.Run(async () =>
+            {
+                string path = await _engine.RenderFormula(tex, 72, "#FFFFFF");
+                bool ok = path != null;
+                string msg = ok ? ("公式已渲染：" + Path.GetFileName(path)) : "渲染失败：请确认引擎已连接且 LaTeX 就绪";
+                await Application.Current.Dispatcher.InvokeAsync(() => report(ok, msg));
+                if (ok)
+                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true }); } catch { }
+            });
+        }
+
+        public void InsertObjectFromTerminal(string kind)
+        {
+            Application.Current?.Dispatcher.Invoke(() => InsertObject(kind));
+        }
+
+        public void OpenPreviewFromTerminal()
+        {
+            Application.Current?.Dispatcher.Invoke(() => OpenPreview());
+        }
+
+        public void OpenSourceFromTerminal()
+        {
+            Application.Current?.Dispatcher.Invoke(() =>
+            {
+                InspectorVisible = true;
+                ShowToast("已在右侧显示代码窗格");
+            });
+        }
+
+        public void SelectSlideByIndex(int index)
+        {
+            if (index >= 0 && index < Slides.Count)
+                Application.Current?.Dispatcher.Invoke(() => CurrentSlide = Slides[index]);
+        }
+
+        public void ExportMovieFromTerminal(Action<string> report)
+        {
+            _ = Task.Run(async () =>
+            {
+                if (!_engine.IsConnected)
+                {
+                    await Application.Current.Dispatcher.InvokeAsync(() => report("导出需要连接 Manim 引擎；原型模式下跳过。"));
+                    return;
+                }
+                string path = Path.Combine(EnvironmentService.UserDataDir, "ManimbleShow.mp4");
+                await Application.Current.Dispatcher.InvokeAsync(() => report("正在导出 MP4：" + path));
+                string result = await _engine.ExportMovie(path);
+                await Application.Current.Dispatcher.InvokeAsync(() => report(result != null ? "导出完成：" + result : "导出失败"));
+            });
+        }
+
+        #endregion
 
         private async Task RenderFormulaInteractive(string tex)
         {
