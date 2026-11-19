@@ -58,7 +58,8 @@
                          AcceptsReturn="True" AcceptsTab="True" IsUndoEnabled="False"
                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                          Padding="6,8,8,8" SpellCheck.IsEnabled="False"
-                         SelectionBrush="{DynamicResource AccentSoftBrush}"
+                         CaretBrush="{DynamicResource CaretBrush}"
+                         SelectionBrush="{DynamicResource CodeSelectionBrush}" SelectionOpacity="0.55"
                          TextChanged="CodeBox_TextChanged" KeyDown="CodeBox_KeyDown"
                          PreviewKeyDown="CodeBox_PreviewKeyDown"/>
         </Grid>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -100,15 +101,17 @@ namespace ManimbleWin.ViewModels
             get => _selectedObject;
             set
             {
-                if (SetProperty(ref _selectedObject, value))
-                {
-                    foreach (var s in Slides)
-                        foreach (var b in s.Builds)
-                            foreach (var o in b.Objects)
-                                o.IsSelected = ReferenceEquals(o, value);
-                    RaisePropertyChanged(nameof(HasSelection));
-                    RebuildSourceLines();
-                }
+                var old = _selectedObject;
+                if (!SetProperty(ref _selectedObject, value)) return;
+                if (ReferenceEquals(old, value)) return;
+                if (old != null) old.PropertyChanged -= SelectedObject_PropertyChanged;
+                if (value != null) value.PropertyChanged += SelectedObject_PropertyChanged;
+                foreach (var s in Slides)
+                    foreach (var b in s.Builds)
+                        foreach (var o in b.Objects)
+                            o.IsSelected = ReferenceEquals(o, value);
+                RaisePropertyChanged(nameof(HasSelection));
+                RebuildSourceLines();
             }
         }
 
@@ -331,6 +334,12 @@ namespace ManimbleWin.ViewModels
         public ICommand OpenDependencyCenterCommand { get; }
         public ICommand RenderFormulaCommand { get; }
 
+        /// <summary>检视器里「重新渲染」：强制用 LaTeX 重排当前选中的公式。</summary>
+        public ICommand RerenderFormulaCommand { get; }
+
+        /// <summary>检视器里「编辑…」：打开带实时预览的公式编辑器修改选中公式。</summary>
+        public ICommand EditFormulaCommand { get; }
+
         #endregion
 
         #region 源码编辑 / 预览 / 终端
@@ -433,6 +442,8 @@ namespace ManimbleWin.ViewModels
             ConnectEngineCommand = new RelayCommand(_ => _ = ConnectEngine());
             OpenDependencyCenterCommand = new RelayCommand(_ => OpenDependencyCenter(false));
             RenderFormulaCommand = new RelayCommand(p => _ = RenderFormulaInteractive(p?.ToString()));
+            RerenderFormulaCommand = new RelayCommand(_ => RerenderSelectedFormula());
+            EditFormulaCommand = new RelayCommand(_ => EditSelectedFormula());
             ApplySourceEditCommand = new RelayCommand(_ => ApplySourceEdit());
             RevertSourceEditCommand = new RelayCommand(_ => RevertSourceEdit());
             OpenPreviewCommand = new RelayCommand(_ => OpenPreview());
@@ -450,8 +461,7 @@ namespace ManimbleWin.ViewModels
             _engine = new EngineIntegration(this);
             _engine.Log += msg => ShowToast(msg);
 
-            // 坐标写回引擎的节流器（拖动停手 0.7 秒后提交一次）
-            _engineSync = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            // 坐标写回引擎的节流器（拖动停手 0.7 秒后提交一次）            _engineSync = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
             _engineSync.Tick += async (s, e) =>
             {
                 _engineSync.Stop();
@@ -465,6 +475,15 @@ namespace ManimbleWin.ViewModels
                 SourceEditStatus = "正在把新坐标写回引擎…";
                 bool ok = await _engine.ApplyTextEdit(slide, expected, text);
                 SourceEditStatus = ok ? "坐标已写回引擎并重新渲染" : "已写回本地代码（引擎未接受该修改）";
+            };
+
+            // 检视器改公式时的防抖：停手 400ms 才排版一次，避免每敲一个字符都跑 LaTeX
+            _texEditTimer.Tick += (s, e) =>
+            {
+                _texEditTimer.Stop();
+                var target = _texEditTarget;
+                _texEditTarget = null;
+                if (target != null) ApplyFormulaEdit(target);
             };
 
             // 首次启动：窗口呈现后再弹出环境准备向导，避免阻塞主窗口构造
@@ -761,6 +780,98 @@ namespace ManimbleWin.ViewModels
         /// <summary>公式渲染状态，显示在状态栏。</summary>
         public string FormulaStatus { get => _formulaStatus; set => SetProperty(ref _formulaStatus, value); }
 
+        // 检视器里改公式源码 / 字号 / 颜色：停手 400ms 后自动重新排版
+        private readonly System.Windows.Threading.DispatcherTimer _texEditTimer =
+            new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        private CanvasObject _texEditTarget;
+        private bool _applyingFormula;
+
+        /// <summary>选中对象变化时只监听当前对象，避免整表订阅。</summary>
+        private void SelectedObject_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            var o = sender as CanvasObject;
+            if (o == null || _applyingFormula) return;
+            if (o.Kind != ObjectKind.Tex || !ReferenceEquals(o, SelectedObject)) return;
+            if (e.PropertyName != nameof(CanvasObject.Value) &&
+                e.PropertyName != nameof(CanvasObject.FontSize) &&
+                e.PropertyName != nameof(CanvasObject.Color)) return;
+
+            _texEditTarget = o;
+            _texEditTimer.Stop();
+            _texEditTimer.Start();
+        }
+
+        /// <summary>把检视器里的公式改动落到画布（重新排版）和源码。</summary>
+        private void ApplyFormulaEdit(CanvasObject o)
+        {
+            if (o == null || o.Kind != ObjectKind.Tex) return;
+
+            string tex = LatexService.NormalizeTex(o.Value);
+            if (string.IsNullOrWhiteSpace(tex)) { FormulaStatus = "公式：内容为空"; return; }
+
+            _applyingFormula = true;
+            try
+            {
+                if (tex != o.Value) o.Value = tex;
+                o.DisplayText = LatexPretty.Pretty(tex);
+            }
+            finally { _applyingFormula = false; }
+
+            RenderFormulaObject(o, force: true);
+            CommitObjectProperties(o, "公式");
+        }
+
+        /// <summary>把对象当前参数重写回它那行源码（仅限画布生成、带标识的行）。</summary>
+        private void CommitObjectProperties(CanvasObject o, string what)
+        {
+            if (o == null || CurrentSlide == null) return;
+            string before = CurrentSlide.Source ?? "";
+            string updated, note;
+            if (!SourceCodeGenerator.TryRewriteObjectLine(before, o, SlideDisplayWidth / Zoom, SlideDisplayHeight / Zoom,
+                                                          out updated, out note))
+                return;
+            if (updated == before) return;
+
+            CurrentSlide.Source = updated;
+            SyncSourceText();
+            RebuildSourceLines();
+            SourceEditStatus = $"{what}已写回代码";
+            ScheduleEngineSync(CurrentSlide, before);
+        }
+
+        /// <summary>检视器「重新渲染」：忽略缓存强制重排当前公式。</summary>
+        public void RerenderSelectedFormula()
+        {
+            var o = SelectedObject;
+            if (o == null || o.Kind != ObjectKind.Tex)
+            {
+                ShowToast("请先选中一个公式对象");
+                return;
+            }
+            RenderFormulaObject(o, force: true);
+        }
+
+        /// <summary>检视器「编辑…」：用公式编辑器改现有公式。</summary>
+        public void EditSelectedFormula()
+        {
+            var o = SelectedObject;
+            if (o == null || o.Kind != ObjectKind.Tex)
+            {
+                ShowToast("请先选中一个公式对象");
+                return;
+            }
+            var dlg = new Views.FormulaDialog
+            {
+                Owner = Application.Current?.MainWindow,
+                InitialExpression = o.Value
+            };
+            if (dlg.ShowDialog() != true || string.IsNullOrWhiteSpace(dlg.Expression)) return;
+
+            o.Value = LatexService.NormalizeTex(dlg.Expression);
+            ApplyFormulaEdit(o);
+            ShowToast("公式已更新");
+        }
+
         /// <summary>为当前页所有公式对象请求真实 LaTeX 渲染（结果按内容缓存，重复调用没有开销）。</summary>
         public void EnsureLatexRendered(Slide slide)
         {
@@ -776,8 +887,8 @@ namespace ManimbleWin.ViewModels
                         RenderFormulaObject(o);
         }
 
-        /// <summary>渲染单个公式对象：写 SpritePath 后画布即显示真实排版。</summary>
-        private async void RenderFormulaObject(CanvasObject o)
+        /// <summary>渲染单个公式对象：写 SpritePath 后画布即显示真实排版。force=true 时忽略去重缓存。</summary>
+        private async void RenderFormulaObject(CanvasObject o, bool force = false)
         {
             if (o == null) return;
             string tex = LatexService.NormalizeTex(string.IsNullOrWhiteSpace(o.Value) ? o.DisplayText : o.Value);
@@ -793,7 +904,7 @@ namespace ManimbleWin.ViewModels
                 return;
             }
             string key = tex + "|" + (int)o.FontSize + "|" + o.Color;
-            if (!_latexRequested.Add(key)) return;
+            if (!_latexRequested.Add(key) && !force) return;
             try
             {
                 FormulaStatus = "公式：正在用 LaTeX 渲染…";

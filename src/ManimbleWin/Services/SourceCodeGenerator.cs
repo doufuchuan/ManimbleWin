@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using ManimbleWin.Models;
 
 namespace ManimbleWin.Services
@@ -170,8 +171,79 @@ namespace ManimbleWin.Services
             return true;
         }
 
-        private static int FindMatchingParen(string s, int openIdx)
+        /// <summary>
+        /// 对象的内容 / 字号 / 颜色在检视器里被改过之后，只替换那一行里对应的三处：
+        /// <c>MathTex("…")</c> 的公式文本、<c>font_size=</c>、<c>color=</c>。
+        /// <c>.move_to(...)</c> 与行尾 <c># manimble:&lt;id&gt;</c> 原样保留 ——
+        /// 整行重写会按画布像素反算坐标，可能让物体轻微移位，这里不冒这个风险。
+        /// 只有能按标识找到“画布自己生成的行”才动手，手写语句一律不碰。
+        /// </summary>
+        public static bool TryRewriteObjectLine(string source, CanvasObject o, double frameW, double frameH,
+                                                out string updated, out string note)
         {
+            updated = source;
+            note = null;
+            if (string.IsNullOrEmpty(source) || o == null) { note = "没有可写回的源码"; return false; }
+            if (string.IsNullOrEmpty(o.CodeId)) { note = "该对象没有源码标识"; return false; }
+
+            var lines = source.Replace("\r\n", "\n").Split('\n').ToList();
+            string tag = Marker + ":" + o.CodeId;
+            int idx = lines.FindIndex(l => l.Contains(tag));
+            if (idx < 0) { note = "代码里找不到该对象的标记行"; return false; }
+            o.SourceLine = idx + 1;
+
+            string line = lines[idx];
+            int callAt = line.IndexOf("MathTex(", StringComparison.Ordinal);
+            int open = callAt >= 0 ? callAt + "MathTex".Length : -1;
+            int close = open >= 0 ? FindMatchingParen(line, open) : -1;
+
+            string rewritten = line;
+
+            // 1) 公式文本：调用参数里的第一个字符串字面量
+            if (close > open)
+            {
+                int q = -1;
+                for (int i = open + 1; i < close; i++)
+                    if (line[i] == '"' || line[i] == '\'') { q = i; break; }
+
+                if (q >= 0)
+                {
+                    char quote = line[q];
+                    int qEnd = -1;
+                    for (int i = q + 1; i < close; i++)
+                    {
+                        if (line[i] == '\\') { i++; continue; }   // 跳过被转义的字符
+                        if (line[i] == quote) { qEnd = i; break; }
+                    }
+                    if (qEnd > q)
+                    {
+                        // 行里原本可能带 r"…" / f"…" 前缀，前缀要一起替换掉，
+                        // 否则会拼出 rr"…" 这种非法字面量。
+                        int qStart = q;
+                        if (q - 1 > open && "rRuUbBfF".IndexOf(line[q - 1]) >= 0 &&
+                            (q - 2 <= open || !(char.IsLetterOrDigit(line[q - 2]) || line[q - 2] == '_')))
+                            qStart = q - 1;
+
+                        string tex = NormalizeTex(string.IsNullOrEmpty(o.Value) ? o.DisplayText : o.Value);
+                        rewritten = rewritten.Substring(0, qStart) + RawString(tex) + rewritten.Substring(qEnd + 1);
+                    }
+                }
+            }
+
+            // 2) 字号 3) 颜色
+            rewritten = Regex.Replace(rewritten, @"font_size\s*=\s*\d+", "font_size=" + Int(o.FontSize));
+            if (!string.IsNullOrEmpty(o.Color))
+                rewritten = Regex.Replace(rewritten, "color\\s*=\\s*\"#[0-9A-Fa-f]{3,8}\"", "color=\"" + o.Color + "\"");
+
+            if (rewritten == line) { note = "代码已是最新"; return false; }
+
+            lines[idx] = rewritten;
+            updated = string.Join("\n", lines);
+            note = "已更新该公式的代码行";
+            return true;
+        }
+
+        private static int FindMatchingParen(string s, int openIdx)        {
             if (openIdx < 0 || openIdx >= s.Length || s[openIdx] != '(') return -1;
             int depth = 0;
             for (int i = openIdx; i < s.Length; i++)

@@ -17,6 +17,9 @@
     <SolidColorBrush x:Key="ChromeBackgroundBrush" Color="#1E1E1E"/>
     <SolidColorBrush x:Key="SubtleBackgroundBrush" Color="#2E2E2E"/>
     <SolidColorBrush x:Key="SeparatorBrush" Color="#3A3A3A"/>
+    <!-- 代码编辑器光标 / 选中：明暗主题下都保证与代码底色强反差 -->
+    <SolidColorBrush x:Key="CaretBrush" Color="#FF9F5A"/>
+    <SolidColorBrush x:Key="CodeSelectionBrush" Color="#66FF6C0C"/>
 
     <!-- 固定色，不随明暗切换 -->
     <SolidColorBrush x:Key="SelectionBrush" Color="#FF6C0C"/>

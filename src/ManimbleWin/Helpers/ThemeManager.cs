@@ -52,6 +52,11 @@ namespace ManimbleWin.Helpers
             Set(r, "TextPrimaryBrush", dark ? InkDark : InkLight);
             Set(r, "ChromeBackgroundBrush", dark ? ChromeDark : ChromeLight);
             Set(r, "SeparatorBrush", dark ? SepDark : SepLight);
+            // 代码编辑器光标：暗色用亮橙、亮色用深橙，两种底色下都清晰可见
+            Set(r, "CaretBrush", dark ? Color.FromRgb(0xFF, 0x9F, 0x5A) : Color.FromRgb(0xC1, 0x44, 0x0E));
+            Set(r, "CodeSelectionBrush", dark
+                ? Color.FromArgb(0x66, 0xFF, 0x6C, 0x0C)
+                : Color.FromArgb(0x4D, 0xFF, 0x6C, 0x0C));
             Set(r, "TextSecondaryBrush", dark ? Color.FromRgb(0xAE, 0xAE, 0xAE) : Color.FromRgb(0x5A, 0x5A, 0x5A));
             Set(r, "SubtleBackgroundBrush", dark ? Color.FromRgb(0x2E, 0x2E, 0x2E) : Color.FromRgb(0xE6, 0xE6, 0xE6));
             ThemeChanged?.Invoke();

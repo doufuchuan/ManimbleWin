@@ -18,6 +18,14 @@ namespace ManimbleWin
         {
             if (!(DataContext is MainViewModel vm)) return;
 
+            // Ctrl+Enter：在检视器里改公式时立即重新排版（焦点在输入框里也要生效）
+            if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control)
+            {
+                vm.RerenderSelectedFormula();
+                e.Handled = true;
+                return;
+            }
+
             // 焦点在文本输入控件内时不劫持按键（含代码编辑器的 RichTextBox）
             if (e.OriginalSource is System.Windows.Controls.Primitives.TextBoxBase) return;
 
@@ -47,7 +55,10 @@ namespace ManimbleWin
                 case Key.Enter:
                     if (vm.SelectedObject != null)
                     {
-                        vm.ShowToast("双击或按 Enter 编辑文本 — 原型模式");
+                        if (vm.SelectedObject.Kind == ManimbleWin.Models.ObjectKind.Tex)
+                            vm.EditSelectedFormula();
+                        else
+                            vm.ShowToast("双击对象可重新输入内容");
                         e.Handled = true;
                     }
                     break;

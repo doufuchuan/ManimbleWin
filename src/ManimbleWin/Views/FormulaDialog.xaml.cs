@@ -16,6 +16,9 @@ namespace ManimbleWin.Views
 
         public string Expression { get; private set; }
 
+        /// <summary>打开前赋值：用于编辑已有公式（而不是新建）。</summary>
+        public string InitialExpression { get; set; }
+
         public FormulaDialog()
         {
             InitializeComponent();
@@ -27,6 +30,7 @@ namespace ManimbleWin.Views
             };
             Loaded += (s, e) =>
             {
+                if (!string.IsNullOrEmpty(InitialExpression)) Input.Text = InitialExpression;
                 Input.Focus();
                 Input.CaretIndex = Input.Text.Length;
                 _debounce.Start();

@@ -7,6 +7,28 @@ using System.Windows.Media;
 
 namespace ManimbleWin.Helpers
 {
+    /// <summary>
+    /// 枚举值等于参数（或 Target 属性）时显示，否则折叠；Invert=true 取反。
+    /// 用于按对象类型切换检视器里的编辑区（公式 vs 普通内容）。
+    /// </summary>
+    public class EnumToVisibilityConverter : IValueConverter
+    {
+        public string Target { get; set; }
+        public bool Invert { get; set; }
+
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            string want = parameter as string;
+            if (string.IsNullOrEmpty(want)) want = Target;
+            bool hit = value != null && !string.IsNullOrEmpty(want) &&
+                       string.Equals(value.ToString(), want, StringComparison.OrdinalIgnoreCase);
+            if (Invert) hit = !hit;
+            return hit ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
+    }
+
     /// <summary>bool -> 画刷。parameter="err" 时：true 红 / false 常规色。</summary>
     public class BoolToBrushConverter : IValueConverter
     {

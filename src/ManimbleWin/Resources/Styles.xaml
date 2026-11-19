@@ -21,6 +21,8 @@
     <conv:IndexToVisibilityConverter x:Key="IndexToVis"/>
     <conv:BoolToBrushConverter x:Key="BoolToBrush"/>
     <conv:PathToImageConverter x:Key="PathToImage"/>
+    <conv:EnumToVisibilityConverter x:Key="KindIsTex" Target="Tex"/>
+    <conv:EnumToVisibilityConverter x:Key="KindIsNotTex" Target="Tex" Invert="True"/>
 
     <!-- 工具栏图标按钮 -->
     <Style x:Key="ToolIconButton" TargetType="Button">
