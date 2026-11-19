@@ -335,9 +335,81 @@ namespace ManimbleWin.ViewModels
             catch (EngineException ex) { Say("插入失败：" + ex.Message); return false; }
         }
 
-        /// <summary>构建并播放演示。片段路径由 present 事件回传。</summary>
-        public async Task<bool> Present(string scene = null)
+        /// <summary>
+        /// 让 manim 真正渲染某个场景的动画片段（animation_preview），
+        /// 等引擎通过事件送回 clips 后返回；超时或失败返回 null。
+        /// </summary>
+        public async Task<List<AnimationClip>> BuildAnimationPreviewAsync(string scene, int timeoutMs = 900000)
         {
+            if (!IsConnected || string.IsNullOrEmpty(scene)) return null;
+
+            var tcs = new TaskCompletionSource<List<AnimationClip>>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void Handler(JsonElement ev)
+            {
+                string name = GetStr(ev, "event");
+                if (name != "animation_preview") return;
+                string phase = GetStr(ev, "phase");
+                if (phase == "ready")
+                {
+                    var list = new List<AnimationClip>();
+                    if (ev.TryGetProperty("clips", out var clips) && clips.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var c in clips.EnumerateArray())
+                        {
+                            string path = GetStr(c, "path");
+                            if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
+                            list.Add(new AnimationClip
+                            {
+                                Path = path,
+                                IsImage = GetStr(c, "kind") == "image",
+                                Rate = GetDouble(c, "playbackRate", 1.0),
+                                Label = scene
+                            });
+                        }
+                    }
+                    Say($"动画片段已就绪：{list.Count} 段");
+                    tcs.TrySetResult(list);
+                }
+                else if (phase == "error")
+                {
+                    tcs.TrySetException(new EngineException(GetStr(ev, "error") ?? "动画构建失败"));
+                }
+                else if (phase == "cancelled")
+                {
+                    tcs.TrySetResult(null);
+                }
+            }
+
+            _engine.EventReceived += Handler;
+            try
+            {
+                var accepted = await _engine.Request("animation_preview", new { scene, height = 720 }, 60000);
+                if (accepted.ValueKind == JsonValueKind.Object && accepted.TryGetProperty("ok", out var okEl)
+                    && okEl.ValueKind == JsonValueKind.False)
+                    throw new EngineException(GetStr(accepted, "error") ?? "引擎拒绝了动画预览请求");
+
+                var finished = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+                if (finished != tcs.Task)
+                {
+                    Say("等待动画片段超时");
+                    return null;
+                }
+                return await tcs.Task;
+            }
+            catch (EngineException ex)
+            {
+                Say("动画渲染失败：" + ex.Message);
+                return null;
+            }
+            finally
+            {
+                _engine.EventReceived -= Handler;
+            }
+        }
+
+        /// <summary>构建并播放演示。片段路径由 present 事件回传。</summary>
+        public async Task<bool> Present(string scene = null)        {
             if (!IsConnected) return false;
             try
             {

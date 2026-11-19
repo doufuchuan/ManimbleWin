@@ -119,6 +119,16 @@ py -3.12 -m venv "$env:LOCALAPPDATA\ManimbleWin\venv"
 
 新用户从 Releases 下载 `ManimbleWin-setup.exe` 双击安装即可，无需任何开发环境。
 
+## 本次更新（v0.4）
+
+- **菜单下拉主题适配**：自绘 MenuItem/ContextMenu/Separator 模板，下拉不再跟随系统白底，深色下为深色面板 + 悬停高亮 + 勾选标记，明暗主题都跟随切换。
+- **真实 LaTeX 公式**：新增 `LatexService`（`latex` → `dvi` → `dvipng`），把公式编译成透明 PNG 并按内容哈希缓存；「插入 ▸ 公式…」打开带实时预览的公式对话框，支持 `amsmath/amssymb` 语法；本机无 LaTeX 时自动降级为 Unicode 近似显示。
+- **动画预览**：新增 `AnimatedStage`，在构建之间做**对象级动画**（淡入 + 上浮 + 缩放回弹、位置/尺寸插值、退出淡出），不再是逐帧切图；预览窗可拖动进度条跳转，并可用「用 Manim 渲染真实动画」调用引擎的 `animation_preview` 播放真实 mp4 片段。
+- **演示程序内置 manim 动画**：示例 deck 新增 `Animation` 场景（Write / Create / Transform / Indicate），本地演示稿也新增同名动画页；`common.py` 在 Windows 下改用 `Segoe UI`，避免缺字体渲染失败。
+- **拖动写回代码坐标**：拖动对象（或方向键微调）松手后，自动把 `move_to((x, y, 0))` 写回源码对应行；行内没有 `move_to` 会追加一个；由 `self.play/self.add/VGroup().arrange` 摆放的对象会提示「由剧本语句摆放」，不会硬改坏代码。引擎已连接时再节流回写到工作副本。
+- **Python 语法高亮**：代码面板改为 RichTextBox + 自研 tokenizer（关键字/字符串/注释/数字/内置名/Manim 类名/装饰器/def 名），带行号、滚动同步、Tab 缩进、回车自动缩进、Ctrl+Z/Y 撤销重做。
+- **终端可打开**：终端改为覆盖在画布上的独立面板（工具栏「终端」/ 菜单「显示终端」/ `Ctrl+\`` 均可打开，Esc 关闭），底部抽屉的终端标签保留；打开抽屉时会修复被拖成 0 的高度。
+
 ## 已还原的界面
 
 - 菜单栏：File / Edit / Insert / Slide / Format / Arrange / View / Play / Help（含快捷键提示）

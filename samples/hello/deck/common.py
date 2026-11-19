@@ -1,9 +1,12 @@
 """Shared base class and constants for the hello deck."""
 
+import platform
+
 from manim import *
 from manim_slides import Slide
 
-FONT = "Helvetica Neue"
+# Windows 上没有 Helvetica Neue，Text() 指定缺失字体会渲染失败，按平台选一个可用字体。
+FONT = "Segoe UI" if platform.system() == "Windows" else "Helvetica Neue"
 ACCENT = "#7C5CFF"
 
 

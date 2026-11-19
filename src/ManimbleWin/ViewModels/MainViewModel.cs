@@ -41,6 +41,8 @@ namespace ManimbleWin.ViewModels
                     RaisePropertyChanged(nameof(StatusBarText));
                     RebuildSourceLines();
                     SyncSourceText();
+                    // 公式对象：用本机 LaTeX 渲染成真实 PNG（不依赖引擎）
+                    EnsureLatexRendered(value);
                     // 引擎已连接时，切换幻灯片后加载该场景的真实渲染帧
                     bool alreadyRendered = value.CurrentBuild != null && value.CurrentBuild.HasRealRender;
                     if (_engine != null && _engine.IsConnected && !alreadyRendered)
@@ -142,6 +144,25 @@ namespace ManimbleWin.ViewModels
         private bool _drawerVisible = true;
         public bool DrawerVisible { get => _drawerVisible; set => SetProperty(ref _drawerVisible, value); }
 
+        /// <summary>独立终端面板（覆盖画布区域），保证点“终端”一定能看到。</summary>
+        private bool _terminalVisible;
+        public bool TerminalVisible { get => _terminalVisible; set => SetProperty(ref _terminalVisible, value); }
+
+        /// <summary>打开终端面板：覆盖在画布上，占满中间列。</summary>
+        public void ShowTerminalPanel()
+        {
+            TerminalVisible = true;
+            ShowToast("终端已打开 · 输入 help 查看命令");
+        }
+
+        /// <summary>打开底部抽屉的某个标签，并保证它有可见高度（拖到 0 也能恢复）。</summary>
+        public void ShowDrawer(int tab)
+        {
+            if (DrawerHeight.Value < 120) DrawerHeight = new System.Windows.GridLength(200);
+            DrawerVisible = true;
+            SelectedDrawerTab = tab;
+        }
+
         private bool _isDarkMode = true;
         public bool IsDarkMode
         {
@@ -241,6 +262,53 @@ namespace ManimbleWin.ViewModels
 
         private readonly EngineIntegration _engine;
         public EngineIntegration Engine => _engine;
+
+        // 拖动/微调后的坐标写回引擎做节流：连续拖动只在停下来后提交一次
+        private readonly System.Windows.Threading.DispatcherTimer _engineSync;
+        private Slide _syncSlide;
+        private string _syncExpected;
+
+        /// <summary>把对象当前坐标写回源码（拖动结束、方向键微调后调用）。</summary>
+        public void CommitObjectMove(CanvasObject o)
+        {
+            if (o == null || CurrentSlide == null) return;
+            string before = CurrentSlide.Source ?? "";
+            string note;
+            string updated;
+            if (SourceCodeGenerator.TryUpdatePosition(before, o, 1280, 720, out updated, out note))
+            {
+                if (updated != before)
+                {
+                    CurrentSlide.Source = updated;
+                    SyncSourceText();
+                    RebuildSourceLines();
+                    SourceEditStatus = "坐标已写回代码 · " + note;
+                    StatusMessage = $"({Math.Round(o.X)}, {Math.Round(o.Y)}) → {note}";
+                    ScheduleEngineSync(CurrentSlide, before);
+                }
+            }
+            else if (!string.IsNullOrEmpty(note))
+            {
+                SourceEditStatus = "坐标未写回：" + note;
+                StatusMessage = note;
+            }
+        }
+
+        /// <summary>拖动过程中在状态栏实时显示坐标。</summary>
+        public void ShowLivePosition(CanvasObject o)
+        {
+            if (o == null) return;
+            StatusMessage = $"位置  x = {Math.Round(o.X)}, y = {Math.Round(o.Y)}   （松手后写回代码）";
+        }
+
+        private void ScheduleEngineSync(Slide slide, string expected)
+        {
+            if (_engine == null || !_engine.IsConnected || slide == null) return;
+            _syncSlide = slide;
+            _syncExpected = expected;
+            _engineSync.Stop();
+            _engineSync.Start();
+        }
 
         private string _engineStatus = "未连接（原型数据）";
         public string EngineStatus { get => _engineStatus; set { if (SetProperty(ref _engineStatus, value)) RaisePropertyChanged(nameof(EngineStatusBrush)); } }
@@ -374,6 +442,23 @@ namespace ManimbleWin.ViewModels
             _engine = new EngineIntegration(this);
             _engine.Log += msg => ShowToast(msg);
 
+            // 坐标写回引擎的节流器（拖动停手 0.7 秒后提交一次）
+            _engineSync = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            _engineSync.Tick += async (s, e) =>
+            {
+                _engineSync.Stop();
+                Slide slide = _syncSlide;
+                string expected = _syncExpected;
+                _syncSlide = null;
+                _syncExpected = null;
+                if (slide == null || _engine == null || !_engine.IsConnected) return;
+                string text = slide.Source;
+                if (string.IsNullOrEmpty(text) || text == expected) return;
+                SourceEditStatus = "正在把新坐标写回引擎…";
+                bool ok = await _engine.ApplyTextEdit(slide, expected, text);
+                SourceEditStatus = ok ? "坐标已写回引擎并重新渲染" : "已写回本地代码（引擎未接受该修改）";
+            };
+
             // 首次启动：窗口呈现后再弹出环境准备向导，避免阻塞主窗口构造
             Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
             {
@@ -479,6 +564,47 @@ namespace ManimbleWin.ViewModels
             Slides.Add(welcome);
             Slides.Add(shapes);
             Slides.Add(formula);
+
+            // ---- Slide 4: Animation（动画演示：预览会逐对象动起来） ----
+            var anim = NewSlide("Animation", 4,
+@"class Animation(Deck):
+    def construct(self):
+        heading = label(""真正会动的演示"", 40).to_corner(UL, buff=0.5)
+        subtitle = label(""Create → Transform → Indicate"", 26, GREY_B).move_to((0, -1.2, 0))
+        self.play(Write(heading), FadeIn(subtitle), run_time=0.9)
+        self.next_slide()
+
+        square = Square(side_length=1.8, color=ACCENT, stroke_width=6).move_to((-3.6, 0.2, 0))
+        caption = label(""Create"", 26, GREY_B).move_to((0, -2.6, 0))
+        self.play(Create(square), FadeIn(caption), run_time=1.2)
+        self.next_slide()
+
+        circle = Circle(radius=1.0, color=ORANGE, stroke_width=6).move_to((3.6, 0.2, 0))
+        self.play(Transform(square, circle), run_time=1.4)");
+            var a0 = anim.Builds[0];
+            a0.Objects.Add(Txt("真正会动的演示", 120, 90, 640, 60, 40, "#FFFFFF", 3, true));
+            a0.Objects.Add(Txt("Create → Transform → Indicate", 300, 330, 680, 44, 26, "#9AA0A6", 4));
+            a0.Notes = "这是动画演示页：进入预览后会看到对象逐个淡入、位移与形变。";
+
+            var a1 = new Build { Name = "构建 2" };
+            a1.Objects.Add(Txt("真正会动的演示", 120, 90, 640, 60, 40, "#FFFFFF", 3, true));
+            a1.Objects.Add(Txt("Create → Transform → Indicate", 300, 330, 680, 44, 26, "#9AA0A6", 4));
+            a1.Objects.Add(new CanvasObject { Kind = ObjectKind.Shape, ShapeLabel = "Rectangle", X = 220, Y = 250, Width = 240, Height = 240, Color = "#7C5CFF", SourceLine = 8 });
+            a1.Objects.Add(Txt("Create", 540, 540, 200, 40, 24, "#9AA0A6", 9));
+            a1.BuildNotes = "调用 Create(square)：矩形描边生长出来。";
+            anim.Builds.Add(a1);
+
+            var a2 = new Build { Name = "构建 3" };
+            a2.Objects.Add(Txt("真正会动的演示", 120, 90, 640, 60, 40, "#FFFFFF", 3, true));
+            a2.Objects.Add(Txt("Create → Transform → Indicate", 300, 330, 680, 44, 26, "#9AA0A6", 4));
+            a2.Objects.Add(new CanvasObject { Kind = ObjectKind.Shape, ShapeLabel = "Rectangle", X = 400, Y = 250, Width = 240, Height = 240, Color = "#7C5CFF", SourceLine = 8 });
+            a2.Objects.Add(new CanvasObject { Kind = ObjectKind.Shape, ShapeLabel = "Circle", X = 860, Y = 250, Width = 240, Height = 240, Color = "#FF9F0A", SourceLine = 13 });
+            a2.Objects.Add(Txt("Transform", 540, 540, 200, 40, 24, "#9AA0A6", 9));
+            a2.BuildNotes = "Transform(square, circle)：矩形移动并变成圆。";
+            anim.Builds.Add(a2);
+
+            anim.AltText = "动画页：标题、副标题、一个紫色矩形和一个橙色圆形。";
+            Slides.Add(anim);
         }
 
         private Slide NewSlide(string name, int number, string source)
@@ -509,6 +635,8 @@ namespace ManimbleWin.ViewModels
                 case "Up": SelectedObject.Y -= step; break;
                 case "Down": SelectedObject.Y += step; break;
             }
+            // 方向键微调同样写回源码坐标
+            CommitObjectMove(SelectedObject);
         }
 
         public void ShowToast(string text)
@@ -531,7 +659,7 @@ namespace ManimbleWin.ViewModels
                 case "ExpandAll": ShowToast("已展开导航器中的所有构建"); break;
                 case "Theme": ShowToast("主题菜单（在工具栏选择色块）"); break;
                 case "DarkMode": IsDarkMode = !IsDarkMode; ShowToast(IsDarkMode ? "深色模式已开启" : "深色模式已关闭"); break;
-                case "Terminal": DrawerVisible = true; SelectedDrawerTab = 3; ShowToast("终端已显示"); break;
+                case "Terminal": ShowTerminalPanel(); break;
                 case "ZoomIn": Zoom += 0.1; break;
                 case "ZoomOut": Zoom -= 0.1; break;
                 case "ZoomFit": Zoom = 0.72; break;
@@ -583,6 +711,7 @@ namespace ManimbleWin.ViewModels
             o.Z = CurrentBuild.Objects.Count;
             CurrentBuild.Objects.Add(o);
             SelectedObject = o;
+            if (o.Kind == ObjectKind.Tex) RenderFormulaObject(o);
 
             // 关键：把对象操作写回 Python 源码，并同步到可编辑代码窗格
             if (CurrentSlide != null)
@@ -612,6 +741,114 @@ namespace ManimbleWin.ViewModels
                 if (lines[i].Contains(line)) return i + 1;
             return lines.Length;
         }
+
+        #region LaTeX 公式
+
+        private readonly HashSet<string> _latexRequested = new HashSet<string>();
+        private bool _latexWarned;
+
+        private string _formulaStatus = "公式：就绪";
+        /// <summary>公式渲染状态，显示在状态栏。</summary>
+        public string FormulaStatus { get => _formulaStatus; set => SetProperty(ref _formulaStatus, value); }
+
+        /// <summary>为当前页所有公式对象请求真实 LaTeX 渲染（结果按内容缓存，重复调用没有开销）。</summary>
+        public void EnsureLatexRendered(Slide slide)
+        {
+            if (slide == null) return;
+            if (!LatexService.IsAvailable)
+            {
+                FormulaStatus = "公式：未检测到 LaTeX（依赖中心 → LaTeX）";
+                return;
+            }
+            foreach (var build in slide.Builds)
+                foreach (var o in build.Objects)
+                    if (o.Kind == ObjectKind.Tex && !o.HasSprite)
+                        RenderFormulaObject(o);
+        }
+
+        /// <summary>渲染单个公式对象：写 SpritePath 后画布即显示真实排版。</summary>
+        private async void RenderFormulaObject(CanvasObject o)
+        {
+            if (o == null) return;
+            string tex = string.IsNullOrWhiteSpace(o.Value) ? o.DisplayText : o.Value;
+            if (string.IsNullOrWhiteSpace(tex)) return;
+            if (!LatexService.IsAvailable)
+            {
+                FormulaStatus = "公式：缺少 LaTeX 环境";
+                if (!_latexWarned)
+                {
+                    _latexWarned = true;
+                    ShowToast("未检测到 LaTeX：公式将以文字近似显示，可在依赖中心安装 TinyTeX");
+                }
+                return;
+            }
+            string key = tex + "|" + (int)o.FontSize + "|" + o.Color;
+            if (!_latexRequested.Add(key)) return;
+            try
+            {
+                FormulaStatus = "公式：正在用 LaTeX 渲染…";
+                string path = await LatexService.RenderAsync(tex, o.FontSize, o.Color);
+                if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                {
+                    o.SpritePath = path;
+                    FormulaStatus = "公式：LaTeX 渲染完成";
+                }
+            }
+            catch (LatexException ex)
+            {
+                _latexRequested.Remove(key);
+                FormulaStatus = "公式渲染失败：" + ex.Message;
+            }
+            catch (Exception ex)
+            {
+                _latexRequested.Remove(key);
+                FormulaStatus = "公式渲染异常：" + ex.Message;
+            }
+        }
+
+        /// <summary>打开公式编辑对话框并插入公式对象。</summary>
+        public void InsertFormulaFromDialog()
+        {
+            if (CurrentBuild == null) return;
+            var dlg = new Views.FormulaDialog { Owner = Application.Current?.MainWindow };
+            if (dlg.ShowDialog() != true || string.IsNullOrWhiteSpace(dlg.Expression)) return;
+            InsertFormula(dlg.Expression);
+        }
+
+        /// <summary>插入一个 LaTeX 公式对象（真排版由 LatexService 完成）。</summary>
+        public void InsertFormula(string tex)
+        {
+            if (CurrentBuild == null || string.IsNullOrWhiteSpace(tex)) return;
+            var o = new CanvasObject
+            {
+                Kind = ObjectKind.Tex,
+                Value = tex.Trim(),
+                DisplayText = LatexPretty.Pretty(tex),
+                X = 440, Y = 300, Width = 400, Height = 110,
+                FontSize = 56,
+                Color = CurrentTheme?.Text ?? "#FFFFFF",
+                Italic = true
+            };
+            o.Z = CurrentBuild.Objects.Count;
+            CurrentBuild.Objects.Add(o);
+            SelectedObject = o;
+
+            if (CurrentSlide != null)
+            {
+                string line = SourceCodeGenerator.LineFor(o, 1280, 720);
+                CurrentSlide.Source = SourceCodeGenerator.AppendLine(CurrentSlide.Source, line);
+                o.SourceLine = CountLine(CurrentSlide.Source, line);
+                o.Loc = $"{CurrentSlide.File}:{o.SourceLine}";
+                RebuildSourceLines();
+                SyncSourceText();
+                SourceEditStatus = "代码已更新（待应用）";
+            }
+
+            RenderFormulaObject(o);
+            ShowToast("已插入公式 · LaTeX 正在排版");
+        }
+
+        #endregion
 
         private void DuplicateSlide()
         {
@@ -675,7 +912,7 @@ namespace ManimbleWin.ViewModels
                 case "Replace": ShowToast("查找和替换 — 原型模式"); break;
 
                 case "InsertText": InsertObject("Text"); break;
-                case "InsertFormula": InsertObject("Formula"); break;
+                case "InsertFormula": InsertFormulaFromDialog(); break;
                 case "InsertImage": InsertObject("Image"); break;
                 case "InsertTable": InsertObject("Table"); break;
                 case "InsertShape": InsertObject("Rectangle"); break;
@@ -704,11 +941,12 @@ namespace ManimbleWin.ViewModels
                 case "Ruler": ShowRuler = !ShowRuler; break;
                 case "Snap": SnapToObjects = !SnapToObjects; break;
                 case "ShowObjects": ShowObjects = !ShowObjects; break;
-                case "SpeakerNotes": DrawerVisible = true; SelectedDrawerTab = 0; break;
+                case "SpeakerNotes": ShowDrawer(0); break;
                 case "DarkModeApp": IsDarkMode = !IsDarkMode; break;
                 case "InvertColors": ShowToast("反色 — 原型模式"); break;
-                case "ShowTerminal": DrawerVisible = true; SelectedDrawerTab = 3; break;
-                case "NewTerminal": if (DrawerTabs.Count < 6) { DrawerTabs.Add("Terminal " + (DrawerTabs.Count - 2)); SelectedDrawerTab = DrawerTabs.Count - 1; ShowToast("已新建终端标签"); } break;
+                case "ShowTerminal": ShowTerminalPanel(); break;
+                case "NewTerminal": ShowTerminalPanel(); ShowToast("已打开终端面板"); break;
+                case "CloseTerminal": TerminalVisible = false; break;
                 case "ToggleNavigator": NavigatorVisible = !NavigatorVisible; break;
                 case "ToggleInspector": InspectorVisible = !InspectorVisible; break;
 
@@ -850,6 +1088,11 @@ namespace ManimbleWin.ViewModels
             var win = new Views.PreviewWindow(vm) { Owner = Application.Current?.MainWindow };
             win.Show();
         }
+
+        /// <summary>供预览窗调用：让引擎用 manim 渲染某场景的真实动画片段。</summary>
+        public Task<List<AnimationClip>> BuildAnimationClipsAsync(string scene)
+            => _engine != null ? _engine.BuildAnimationPreviewAsync(scene)
+                               : Task.FromResult<List<AnimationClip>>(null);
 
         // ---- 终端桥接方法 ----
         public void ConnectFromTerminal() => _ = ConnectEngine();

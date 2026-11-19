@@ -38,23 +38,29 @@
             </StackPanel>
         </Border>
 
-        <!-- 可编辑代码区：行号 + TextBox -->
+        <!-- 可编辑代码区：行号（随滚动同步） + 语法高亮编辑器 -->
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="38"/>
+                <ColumnDefinition Width="46"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <TextBox x:Name="LineNumbers" Grid.Column="0" Text="{Binding SourceLineNumbers, Mode=OneWay}"
-                     Background="{DynamicResource CodeBackgroundBrush}" Foreground="{DynamicResource TextSecondaryBrush}"
-                     FontFamily="Consolas" FontSize="11" BorderThickness="0" IsReadOnly="True"
-                     TextAlignment="Right" Padding="0,8,8,8" Opacity="0.7" VerticalScrollBarVisibility="Hidden"/>
-            <TextBox x:Name="CodeBox" Grid.Column="1"
-                     Text="{Binding SourceText, UpdateSourceTrigger=PropertyChanged}"
-                     Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
-                     FontFamily="Consolas" FontSize="11.5" BorderThickness="0"
-                     AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto"
-                     HorizontalScrollBarVisibility="Auto" Padding="4,8,8,8"
-                     KeyDown="CodeBox_KeyDown"/>
+            <Border Grid.Column="0" Background="{DynamicResource CodeBackgroundBrush}" ClipToBounds="True"
+                    BorderThickness="0,0,1,0" BorderBrush="{DynamicResource SeparatorBrush}">
+                <TextBlock x:Name="Gutter" Padding="0,8,10,0" TextAlignment="Right"
+                           FontFamily="Consolas" FontSize="11.5" LineHeight="17"
+                           LineStackingStrategy="BlockLineHeight"
+                           Foreground="{DynamicResource TextSecondaryBrush}" Opacity="0.6"
+                           IsHitTestVisible="False"/>
+            </Border>
+            <RichTextBox x:Name="CodeBox" Grid.Column="1"
+                         Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
+                         FontFamily="Consolas" FontSize="11.5" BorderThickness="0"
+                         AcceptsReturn="True" AcceptsTab="True" IsUndoEnabled="False"
+                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                         Padding="6,8,8,8" SpellCheck.IsEnabled="False"
+                         SelectionBrush="{DynamicResource AccentSoftBrush}"
+                         TextChanged="CodeBox_TextChanged" KeyDown="CodeBox_KeyDown"
+                         PreviewKeyDown="CodeBox_PreviewKeyDown"/>
         </Grid>
     </Grid>
 </UserControl>

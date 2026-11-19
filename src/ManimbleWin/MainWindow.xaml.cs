@@ -18,8 +18,8 @@ namespace ManimbleWin
         {
             if (!(DataContext is MainViewModel vm)) return;
 
-            // 焦点在 TextBox / ComboBox 内时不劫持按键
-            if (e.OriginalSource is TextBox || e.OriginalSource is ComboBox) return;
+            // 焦点在文本输入控件内时不劫持按键（含代码编辑器的 RichTextBox）
+            if (e.OriginalSource is System.Windows.Controls.Primitives.TextBoxBase) return;
 
             switch (e.Key)
             {
@@ -31,8 +31,18 @@ namespace ManimbleWin
                     }
                     break;
                 case Key.Escape:
+                    if (vm.TerminalVisible) { vm.TerminalVisible = false; e.Handled = true; break; }
                     vm.SelectedObject = null;
                     e.Handled = true;
+                    break;
+                case Key.Oem3:
+                    // Ctrl + ` 打开/关闭终端
+                    if (Keyboard.Modifiers == ModifierKeys.Control)
+                    {
+                        if (vm.TerminalVisible) vm.TerminalVisible = false;
+                        else vm.ShowTerminalPanel();
+                        e.Handled = true;
+                    }
                     break;
                 case Key.Enter:
                     if (vm.SelectedObject != null)

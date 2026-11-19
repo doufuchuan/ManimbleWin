@@ -36,3 +36,24 @@ class Formula(Deck):
 
         table = MathTable([[1, 2, 3], [4, 5, 6]], include_outer_lines=True).scale(0.6).move_to((0, -3.0, 0))
         self.play(FadeIn(table), run_time=0.5)
+
+
+class Animation(Deck):
+    def construct(self):
+        """A real manim animation scene: Write / Create / Transform / Indicate."""
+        heading = label("Really animated, not a slideshow", 40).to_corner(UL, buff=0.5)
+        self.play(Write(heading), run_time=0.9)
+        self.next_slide()
+
+        square = Square(side_length=1.8, color=ACCENT, stroke_width=6).move_to((-3.6, 0.2, 0))
+        circle = Circle(radius=1.0, color=ORANGE, stroke_width=6).move_to((3.6, 0.2, 0))
+        caption = label("Create  ->  Transform", 26, GREY_B).move_to((0, -2.6, 0))
+        self.play(Create(square), FadeIn(caption), run_time=1.2)
+        self.play(Transform(square, circle), run_time=1.4)
+        self.next_slide()
+
+        axes = Axes(x_range=[-4, 4, 1], y_range=[-1.5, 4, 1], x_length=7, y_length=4).move_to((0, -0.3, 0))
+        curve = axes.plot(lambda x: 0.35 * x ** 2 - 1, color=YELLOW, x_range=[-3.2, 3.2])
+        self.play(Create(axes), run_time=0.9)
+        self.play(Create(curve), run_time=1.4)
+        self.play(Indicate(curve, color=ORANGE), run_time=0.8)

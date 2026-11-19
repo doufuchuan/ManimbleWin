@@ -1,3 +1,4 @@
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -57,17 +58,29 @@ namespace ManimbleWin.Views
             Point now = e.GetPosition(SlideSurface);
             double dx = now.X - _dragStart.X;
             double dy = now.Y - _dragStart.Y;
-            double step = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? 10 : 1;
-            _dragging.X = _objStartX + dx;
-            _dragging.Y = _objStartY + dy;
+            double nx = _objStartX + dx;
+            double ny = _objStartY + dy;
+            // 按住 Shift 对齐到 10px 网格
+            if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+            {
+                nx = Math.Round(nx / 10.0) * 10.0;
+                ny = Math.Round(ny / 10.0) * 10.0;
+            }
+            _dragging.X = nx;
+            _dragging.Y = ny;
+            VM?.ShowLivePosition(_dragging);
         }
 
         private void Object_Up(object sender, MouseButtonEventArgs e)
         {
             if (!_isDragging) return;
             _isDragging = false;
-            _dragging = null;
             if (sender is UIElement el && el.IsMouseCaptured) el.ReleaseMouseCapture();
+            var moved = _dragging;
+            _dragging = null;
+            // 松手后把新坐标写回 Python 源码
+            if (moved != null && (Math.Abs(moved.X - _objStartX) > 0.01 || Math.Abs(moved.Y - _objStartY) > 0.01))
+                VM?.CommitObjectMove(moved);
         }
     }
 }
