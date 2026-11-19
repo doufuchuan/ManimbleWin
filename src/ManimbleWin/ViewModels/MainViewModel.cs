@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using ManimbleWin.Helpers;
 using ManimbleWin.Models;
+using ManimbleWin.Services;
 
 namespace ManimbleWin.ViewModels
 {
@@ -34,8 +37,13 @@ namespace ManimbleWin.ViewModels
                     SelectedObject = null;
                     RaisePropertyChanged(nameof(CurrentBuild));
                     RaisePropertyChanged(nameof(CurrentObjects));
+                    RaisePropertyChanged(nameof(UseRealRender));
                     RaisePropertyChanged(nameof(StatusBarText));
                     RebuildSourceLines();
+                    // 引擎已连接时，切换幻灯片后加载该场景的真实渲染帧
+                    bool alreadyRendered = value.CurrentBuild != null && value.CurrentBuild.HasRealRender;
+                    if (_engine != null && _engine.IsConnected && !alreadyRendered)
+                        _ = _engine.LoadSceneInto(value);
                 }
             }
         }
@@ -221,6 +229,26 @@ namespace ManimbleWin.ViewModels
 
         #endregion
 
+        #region 引擎集成（真实 Manim 渲染）
+
+        private readonly EngineIntegration _engine;
+        public EngineIntegration Engine => _engine;
+
+        private string _engineStatus = "未连接（原型数据）";
+        public string EngineStatus { get => _engineStatus; set { if (SetProperty(ref _engineStatus, value)) RaisePropertyChanged(nameof(EngineStatusBrush)); } }
+
+        public string EngineStatusBrush => _engine != null && _engine.IsConnected ? "#3FB950" : "#8B949E";
+        public bool IsEngineConnected => _engine != null && _engine.IsConnected;
+
+        /// <summary>当前 build 是否有引擎真实渲染帧（画布据此显示 PNG 或模拟对象）。</summary>
+        public bool UseRealRender => CurrentBuild != null && CurrentBuild.HasRealRender;
+
+        public ICommand ConnectEngineCommand { get; }
+        public ICommand OpenDependencyCenterCommand { get; }
+        public ICommand RenderFormulaCommand { get; }
+
+        #endregion
+
         #region 抽屉（备注 / 替代文本 / 终端）
 
         public ObservableCollection<string> DrawerTabs { get; } = new ObservableCollection<string>
@@ -284,6 +312,9 @@ namespace ManimbleWin.ViewModels
             SetThemeCommand = new RelayCommand(p => { if (p is DeckTheme t) ApplyTheme(t); });
             NudgeCommand = new RelayCommand(p => Nudge(p?.ToString() ?? ""));
             OpenFindCommand = new RelayCommand(_ => { ShowToast("Find & Replace — prototype"); });
+            ConnectEngineCommand = new RelayCommand(_ => _ = ConnectEngine());
+            OpenDependencyCenterCommand = new RelayCommand(_ => OpenDependencyCenter(false));
+            RenderFormulaCommand = new RelayCommand(p => _ = RenderFormulaInteractive(p?.ToString()));
 
             BuildThemes();
             BuildSampleDeck();
@@ -292,6 +323,20 @@ namespace ManimbleWin.ViewModels
             // 让画布主题跟随 deck 主题
             CurrentTheme = Themes.FirstOrDefault(t => t.Id == "midnight");
             CurrentSlide = Slides.FirstOrDefault();
+
+            // 引擎桥接
+            _engine = new EngineIntegration(this);
+            _engine.Log += msg => ShowToast(msg);
+
+            // 首次启动：窗口呈现后再弹出环境准备向导，避免阻塞主窗口构造
+            Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!AppFlags.SetupSeen)
+                {
+                    OpenDependencyCenter(true);
+                    AppFlags.SetupSeen = true;
+                }
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
         }
 
         #region 数据构建
@@ -637,6 +682,68 @@ namespace ManimbleWin.ViewModels
                 case "Underline": SelectedObject.Underline = !SelectedObject.Underline; break;
             }
             ShowToast(prop + " toggled");
+        }
+
+        #endregion
+
+        #region 引擎 / 依赖方法
+
+        /// <summary>供引擎桥接刷新 CurrentBuild 相关派生属性。</summary>
+        public void RaiseCurrentChanged()
+        {
+            RaisePropertyChanged(nameof(CurrentBuild));
+            RaisePropertyChanged(nameof(CurrentObjects));
+            RaisePropertyChanged(nameof(UseRealRender));
+            RaisePropertyChanged(nameof(StatusBarText));
+            RebuildSourceLines();
+        }
+
+        private async Task ConnectEngine()
+        {
+            if (_engine.IsConnected)
+            {
+                ShowToast("引擎已连接");
+                return;
+            }
+            EngineStatus = "正在启动引擎…";
+            bool ok = await _engine.ConnectAndLoad();
+            EngineStatus = ok ? "已连接 · 真实渲染" : "未连接 · 原型数据";
+            RaisePropertyChanged(nameof(IsEngineConnected));
+            RaisePropertyChanged(nameof(EngineStatusBrush));
+            RaisePropertyChanged(nameof(UseRealRender));
+            ShowToast(ok ? "Manim 引擎已连接，正在渲染示例 deck" : "引擎未连接，可在依赖中心安装后重试");
+        }
+
+        /// <summary>打开依赖中心/首次启动向导。</summary>
+        public void OpenDependencyCenter(bool firstRun)
+        {
+            var vm = new SetupViewModel(this, firstRun);
+            var win = new Views.SetupWindow(vm)
+            {
+                Owner = Application.Current?.MainWindow
+            };
+            var result = win.ShowDialog();
+            if (result == true && !firstRun)
+            {
+                // 用户从依赖中心关闭：若核心依赖就绪且引擎未连，自动尝试连接
+                var report = EnvironmentService.Detect();
+                if (report.CoreReady && !_engine.IsConnected)
+                    _ = ConnectEngine();
+            }
+        }
+
+        private async Task RenderFormulaInteractive(string tex)
+        {
+            // 参数来自终端输入或菜单；为空时渲染一个默认示例公式
+            string value = string.IsNullOrWhiteSpace(tex) ? @"e^{i\pi}+1=0" : tex;
+            ShowToast($"正在渲染公式：{value}");
+            string path = await _engine.RenderFormula(value, 72, "#FFFFFF");
+            if (path != null)
+            {
+                ShowToast("公式已渲染：" + Path.GetFileName(path));
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true }); } catch { }
+            }
+            else ShowToast("公式渲染失败：请确认已连接引擎且 LaTeX 就绪");
         }
 
         #endregion

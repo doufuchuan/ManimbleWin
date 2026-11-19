@@ -29,3 +29,10 @@ packages/
 publish/
 dist/
 Output/
+
+## Python engine runtime
+.venv/
+engine/**/__pycache__/
+*.pyc
+.tmp/
+*.log

@@ -1,8 +1,15 @@
 # ManimbleWin
 
-Manimble 的 **Windows（WPF）UI 交互原型**：高度还原 macOS 版 Manimble 的界面与交互，用于演示；不接真实 Manim 引擎、不执行 Python、不写回源码。
+Manimble 的 **Windows（WPF）桌面版**：高度还原 macOS 版 Manimble 的界面与交互，并**内置原版 Python 引擎**——通过 JSON-lines 协议驱动真实的 Manim 场景渲染与 LaTeX 公式渲染。
 
-基于原项目 [pachterlab/Manimble](https://github.com/pachterlab/Manimble)（BSD 2-Clause）的界面与文档复刻。原版是 Swift/AppKit/Metal 前端 + 共享 Python 引擎（JSON-lines 协议）；本原型用 C#/WPF 重建前端外观与交互，数据与行为为本地模拟。
+基于原项目 [pachterlab/Manimble](https://github.com/pachterlab/Manimble)（BSD 2-Clause）。原版是 Swift/AppKit/Metal 前端 + 平台无关的 Python 引擎（`engine/manimble`）；本项目用 C#/WPF 重建前端，并直接复用原版引擎，实现真正的幻灯片渲染。
+
+## 能力
+
+- **真实 Manim 渲染**：内置 `engine/manimble`，WPF 启动 `python -m manimble.rpc` 子进程，按 `docs/developers/protocol.md` 的 JSON-lines 协议通信；画布显示引擎渲染出的真实帧（`state` / `scene`）。
+- **LaTeX 公式渲染**：公式对象通过引擎 `sprite` 命令（kind=tex）生成由 LaTeX 排版的真实 PNG。
+- **依赖检测与引导**：首次启动弹出环境准备向导，菜单 `Engine › Dependency Center` 随时可打开依赖中心，检测 Python / Manim / FFmpeg / LaTeX 状态并引导安装；Manim 栈可一键安装到项目独立虚拟环境。
+- **原型交互保留**：未连接引擎时自动回退到本地示例数据，界面与全部点击交互仍可用，便于无 Python 环境时演示。
 
 ## 快速开始
 
@@ -35,6 +42,39 @@ dotnet run --project src/ManimbleWin/ManimbleWin.csproj
 ```
 
 或在 Visual Studio 中打开 `ManimbleWin.sln`，按 F5。
+
+## 环境依赖（真实渲染）
+
+应用**首次启动会自动弹出“环境准备”向导**，检测并引导安装以下依赖；也可随时从菜单 `Engine › Dependency Center…` 打开依赖中心。
+
+| 依赖 | 用途 | 获取方式 |
+|---|---|---|
+| Python 3.11+ | 运行引擎 | 依赖中心引导下载；或 [python.org](https://www.python.org/downloads/windows/)（勾选 Add to PATH） |
+| Manim Community 0.21.0 | 场景渲染 | 依赖中心“安装/修复”一键 `pip install -r engine/requirements.txt` 到项目 `.venv`/用户 venv |
+| FFmpeg | 导出 MP4 | pip 的 `imageio-ffmpeg` 自带；或手动安装 |
+| LaTeX（TinyTeX 优先） | 公式与 Beamer | [TinyTeX](https://yihui.org/tinytex/) 或已有 TeX Live / MiKTeX；依赖中心可“补装 LaTeX 宏包” |
+
+安装步骤：
+
+1. 首次启动向导会列出各项状态（✓ 就绪 / ✕ 未安装 / ! 版本或宏包不符）。
+2. 点击缺失项的“安装 / 修复”：Manim 会自动创建虚拟环境并安装全部 Python 依赖；Python/FFmpeg/LaTeX 会打开对应下载页。
+3. 装完点“重新检测”，全部核心项就绪后点“启动 Manimble”。
+4. 主窗口状态栏右侧的绿点表示引擎已连接；从菜单 `Engine › Connect Manim Engine` 可手动连接。
+
+> 未安装任何依赖也能启动应用：此时使用内置示例数据（纯界面演示）。连接引擎后会加载 `samples/hello/deck` 并渲染真实帧。
+
+手动安装（等价于依赖中心的“一键安装”）：
+
+```powershell
+# 1) 创建虚拟环境（放在 %LOCALAPPDATA%\ManimbleWin\venv）
+py -3.12 -m venv "$env:LOCALAPPDATA\ManimbleWin\venv"
+# 2) 安装 Manim 栈
+& "$env:LOCALAPPDATA\ManimbleWin\venv\Scripts\python.exe" -m pip install -r engine\requirements.txt
+# 3) LaTeX：安装 TinyTeX 后补装宏包
+"$env:LOCALAPPDATA\ManimbleWin\venv\Scripts\python.exe" -c "import manim; print(manim.__version__)"
+```
+
+引擎通信实现见 `src/ManimbleWin/Services/EngineService.cs`，数据映射见 `ViewModels/EngineIntegration.cs`。
 
 ## 构建 exe 与安装程序
 

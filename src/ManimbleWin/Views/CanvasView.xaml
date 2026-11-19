@@ -51,14 +51,20 @@
             </Border>
         </DataTemplate>
 
-        <!-- 公式对象 -->
+        <!-- 公式对象：有真实 LaTeX 渲染图时显示 PNG，否则显示源码占位 -->
         <DataTemplate x:Key="TexObjectTemplate">
             <Border Style="{StaticResource ObjectSelectionChrome}" Padding="1" Cursor="Hand"
                     MouseLeftButtonDown="Object_Click" MouseMove="Object_Move" MouseLeftButtonUp="Object_Up"
                     Tag="{Binding}" Background="Transparent">
-                <TextBlock Text="{Binding DisplayText}" Foreground="{Binding Brush}"
-                           FontSize="{Binding FontSize}" FontFamily="Cambria Math" FontStyle="Italic"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                <Grid>
+                    <Image Source="{Binding SpritePath, Converter={StaticResource PathToImage}}"
+                           Stretch="Uniform" IsHitTestVisible="False"
+                           Visibility="{Binding HasSprite, Converter={StaticResource BoolToVis}}"/>
+                    <TextBlock Text="{Binding DisplayText}" Foreground="{Binding Brush}"
+                               FontSize="{Binding FontSize}" FontFamily="Cambria Math" FontStyle="Italic"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                               Visibility="{Binding HasSprite, Converter={StaticResource InvBoolToVis}}"/>
+                </Grid>
             </Border>
         </DataTemplate>
 
@@ -192,8 +198,14 @@
                 <Grid x:Name="SlideSurface" Width="1280" Height="720"
                       Background="{Binding CurrentTheme.Background, Converter={StaticResource StrBrush}}"
                       MouseLeftButtonDown="SlideBG_Click" MouseMove="Object_Move" MouseLeftButtonUp="Object_Up">
-                    <!-- 占位符框（在_objects 之下） -->
-                    <ItemsControl ItemsSource="{Binding PlaceholderObjects}" IsHitTestVisible="False">
+                    <!-- 引擎真实渲染帧（有真实渲染时作为底层画面） -->
+                    <Image x:Name="RealFrame" Stretch="Uniform" IsHitTestVisible="False"
+                           Source="{Binding CurrentBuild.RenderedImage, Converter={StaticResource PathToImage}}"
+                           Visibility="{Binding UseRealRender, Converter={StaticResource BoolToVis}}"/>
+
+                    <!-- 占位符框（在_objects 之下；真实渲染时隐藏） -->
+                    <ItemsControl ItemsSource="{Binding PlaceholderObjects}" IsHitTestVisible="False"
+                                  Visibility="{Binding UseRealRender, Converter={StaticResource InvBoolToVis}}">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                         <ItemsControl.ItemContainerStyle>
                             <Style TargetType="ContentPresenter">

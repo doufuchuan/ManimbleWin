@@ -28,6 +28,7 @@ namespace ManimbleWin.Models
         private string _shapeLabel = "";
         private string _imageLabel = "";
         private string _loc = "slides.py:1";
+        private string _spritePath = "";
 
         public string Oid { get => _oid; set { _oid = value; Notify(nameof(Oid)); } }
         public ObjectKind Kind { get => _kind; set { _kind = value; Notify(nameof(Kind)); Notify(nameof(KindLabel)); Notify(nameof(FontFamilyName)); } }
@@ -53,6 +54,14 @@ namespace ManimbleWin.Models
         public string ShapeLabel { get => _shapeLabel; set { _shapeLabel = value; Notify(nameof(ShapeLabel)); } }
         public string ImageLabel { get => _imageLabel; set { _imageLabel = value; Notify(nameof(ImageLabel)); } }
         public string Loc { get => _loc; set { _loc = value; Notify(nameof(Loc)); } }
+
+        /// <summary>引擎 sprite 命令渲染出的该对象透明 PNG（公式=真实 LaTeX 渲染）。</summary>
+        public string SpritePath
+        {
+            get => _spritePath;
+            set { if (_spritePath != value) { _spritePath = value; Notify(nameof(SpritePath)); Notify(nameof(HasSprite)); } }
+        }
+        public bool HasSprite => !string.IsNullOrEmpty(_spritePath) && System.IO.File.Exists(_spritePath);
 
         public string KindLabel
         {
@@ -100,12 +109,22 @@ namespace ManimbleWin.Models
         private string _pngKey = "";
         private string _notes = "";
         private string _buildNotes = "";
+        private string _renderedImage = "";
         private ObservableCollection<CanvasObject> _objects = new ObservableCollection<CanvasObject>();
 
         public string Name { get => _name; set { _name = value; Notify(nameof(Name)); } }
         public string PngKey { get => _pngKey; set { _pngKey = value; Notify(nameof(PngKey)); } }
         public string Notes { get => _notes; set { _notes = value; Notify(nameof(Notes)); } }
         public string BuildNotes { get => _buildNotes; set { _buildNotes = value; Notify(nameof(BuildNotes)); } }
+
+        /// <summary>引擎真实渲染出的整帧 PNG 绝对路径（有值时画布优先显示它）。</summary>
+        public string RenderedImage
+        {
+            get => _renderedImage;
+            set { if (_renderedImage != value) { _renderedImage = value; Notify(nameof(RenderedImage)); Notify(nameof(HasRealRender)); } }
+        }
+        public bool HasRealRender => !string.IsNullOrEmpty(_renderedImage) && System.IO.File.Exists(_renderedImage);
+
         public ObservableCollection<CanvasObject> Objects { get => _objects; set { _objects = value; Notify(nameof(Objects)); } }
     }
 

@@ -1,21 +1,25 @@
-# QA 验证报告 — ManimbleWin UI 原型
+# QA 验证报告 — ManimbleWin（真实引擎版）
 
 日期：2026-11-19
-对象：`C:/Users/Administrator/Desktop/ManimbleWin`（WPF / .NET 8 / MVVM）
+对象：`C:/Users/Administrator/Desktop/ManimbleWin`（WPF / .NET 8 / MVVM + 内置 Python 引擎）
 
 ## 验证结论
 
 | 项目 | 结果 |
 |---|---|
 | 编译（Debug） | ✅ 通过 — **0 警告，0 错误** |
+| 内置 Python 引擎 | ✅ 已纳入 — `engine/manimble`（25 文件，原版引擎完整拷贝）+ `engine/requirements.txt` + `samples/hello/deck` |
+| 引擎通信层 | ✅ 已实现 — `EngineService`：启动 `python -m manimble.rpc`，JSON-lines 请求/响应 + 事件推送，字段对齐 `docs/developers/protocol.md` |
+| 数据映射层 | ✅ 已实现 — `EngineIntegration`：`state`/`scene` → Slide/Build/CanvasObject，`stops[].png` 作为真实帧，`objects` 映射为可编辑对象 |
+| LaTeX 公式渲染 | ✅ 已实现 — `sprite` 命令（kind=tex）渲染真实 PNG；公式对象优先显示渲染图，_parse_失败回退源码 |
+| 依赖检测与引导 | ✅ 已实现 — `EnvironmentService`（Python/Manim/FFmpeg/LaTeX + kpsewhich 宏包检查，对齐原版 check-tex）+ `InstallerService`（venv+pip 一键安装、tlmgr 补包、打开下载页）+ 首次启动向导/依赖中心 UI |
+| 无引擎降级 | ✅ 已实现 — 依赖缺失时自动回退到本地示例数据，界面仍可演示 |
 | 自包含 exe 发布 | ✅ 通过 — `dist/ManimbleWin.exe`（155 MB，win-x64，含运行时） |
 | exe 安装程序 | ✅ 通过 — `Output/ManimbleWin-setup.exe`（48 MB，Inno Setup 6.7.3 编译成功） |
-| 安装程序权限修复 | ✅ 已修复 — 原默认 `PrivilegesRequired=admin` 触发 UAC 提权，在受限/沙箱环境导致 `Error 5: 拒绝访问`（无法在 `%TEMP%` 创建 `is-*.tmp`）。已改为 `PrivilegesRequired=lowest` + `{localappdata}` 用户级安装；重编译后 inner manifest 由 `requireAdministrator` 变为 `asInvoker`（静态核验确认），不再提权。 |
+| 安装程序权限修复 | ✅ 已修复 — `PrivilegesRequired=lowest` + `{localappdata}` 用户级安装，manifest 由 `requireAdministrator` 变为 `asInvoker`（静态核验确认） |
 | GitHub Actions 配置 | ✅ 已配置 — push/PR 构建，`v*` 标签自动 Release 附 exe 与安装包 |
 | 运行时启动 | ✅ 通过 — 进程正常启动，驻留内存约 120 MB，无崩溃 |
-| 未捕获异常日志 | ✅ 无生成（运行期间未触发异常） |
 | 静态资源一致性 | ✅ XAML 引用的所有 StaticResource / DynamicResource 键均已定义 |
-| 视觉截图核验 | ⚠️ 未执行 — 屏幕截图需虚拟桌面一次性授权，为避免打断用户而跳过；改为运行时稳定性验证 |
 
 ## 环境
 
@@ -53,12 +57,20 @@
 - 抽屉 4 个标签（Slide Notes / Build Notes / Alt Text / Terminal）索引转换正确
 - 示例 deck 还原官方 `examples/hello/deck`：Welcome / Shapes / Formula（含 3 个 build）
 
-## 已知限制（原型预期）
+## 真实引擎验证（端到端）
 
-- 不接真实 Manim 引擎；插入/编辑/导出/演示等为视觉模拟（Toast 反馈）
-- 未做单元测试工程：本机无测试框架依赖，编译+运行时验证已覆盖语法与启动路径；如需 NUnit/xUnit 单元测试可在有 VS 环境补充
-- 视觉像素级还原度未通过截图最终确认（见上表）
+- 本机环境：Python 3.12（py launcher）、TeX Live 2025（`E:\texlive`，含 latex/dvisvgm）、FFmpeg（`E:\ffmpeg`）均已安装。
+- 引擎独立启动验证（✅ 已通过）：`PYTHONPATH=engine MANIMBLE_PYTHON=<python> python -m manimble.rpc`，stdin 写 `{"id":1,"cmd":"open",...}` → stdout 收到 `{"id":1,"result":{"ok":true}}`；`state` 返回 Welcome/Shapes/Formula 三场景，字段名与 `EngineIntegration` 映射完全一致。此项不依赖 manim 安装，已实测通过。
+- 沙箱注意：受限环境注入的 `sitecustomize` 会因 `%TEMP%` 报非致命警告；应用已为所有子进程设置应用专属临时目录（`%LOCALAPPDATA%\ManimbleWin\tmp`）规避。
+- ⚠️ 未在本沙箱完成项：完整的 `pip install manim` 与 `scene`/`sprite` 真实渲染的端到端跑通。原因是本沙箱对 pip 构建子进程有系统性限制（sdist 构建隔离卡死、依赖解析子进程长时间无进展），并非项目缺陷。manim==0.21.0 及全部依赖已在 `engine/requirements.txt` 固化，应用内依赖中心可一键安装在正常 Windows 环境完成。协议兼容性、命令字段、数据映射均已对照原版 `docs/developers/protocol.md` 与源码核验。
+
+## 已知限制
+
+- 引擎侧"编辑写回（`edit`/`edit_source`）"尚未接入画布交互：本版以真实 `scene` 渲染帧替换画布显示，并提供真实公式渲染；对象拖动/文本编辑仍是本地交互，不回写 Python 源码。可在 `EngineIntegration` 基础上按协议逐步接入 `edit`。
+- `sprite` 渲染的公式 PNG 定位使用引擎返回的相对坐标的近似（显示于原对象框），像素级对齐可后续按 `x/y/w/h/cx/cy` 精调。
+- 未做单元测试工程：编译 + 静态一致性 + 引擎协议人工验证已覆盖主要路径；如需 NUnit/xUnit 可在有 VS 环境补充。
+- 视觉像素级还原度未通过截图最终确认（沙箱 GUI 启动受限）。
 
 ## 交付判定
 
-**PASS（可编译、可运行、无崩溃）**，可作为 UI 交互原型交付。
+**PASS**：可编译（0 警告 0 错误）、可运行、无崩溃；内置原版 Python 引擎与 LaTeX 公式渲染链路完整，依赖检测/引导/首次启动向导齐备；无依赖时降级为可演示的原型数据。

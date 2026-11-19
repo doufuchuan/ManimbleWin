@@ -7,6 +7,20 @@ using System.Windows.Media;
 
 namespace ManimbleWin.Helpers
 {
+    /// <summary>bool -> 画刷。parameter="err" 时：true 红 / false 常规色。</summary>
+    public class BoolToBrushConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            bool b = value is bool v && v;
+            bool errMode = parameter != null && parameter.ToString() == "err";
+            if (errMode)
+                return new SolidColorBrush(b ? Color.FromRgb(0xF8, 0x51, 0x49) : Color.FromRgb(0xC9, 0xD1, 0xD9));
+            return new SolidColorBrush(b ? Color.FromRgb(0xFF, 0x6C, 0x0C) : Colors.Transparent);
+        }
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
+    }
+
     public class BoolToFontWeightConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
