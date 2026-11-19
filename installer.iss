@@ -16,7 +16,12 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={autopf}\{#MyAppName}
+; User-level install: no UAC elevation required. This avoids the
+; "unable to create temp directory / Error 5: Access denied" failure that
+; occurs when an elevated setup process cannot write to the user's %TEMP%
+; in restricted / sandboxed environments.
+PrivilegesRequired=lowest
+DefaultDirName={localappdata}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 LicenseFile=LICENSE
 OutputDir=Output

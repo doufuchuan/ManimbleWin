@@ -55,6 +55,16 @@ dotnet run --project src/ManimbleWin/ManimbleWin.csproj
 
 本机已实测：`dist/ManimbleWin.exe`（155 MB）与 `Output/ManimbleWin-setup.exe`（48 MB）均成功产出。
 
+### 关于安装权限
+
+安装包采用**用户级安装**（`PrivilegesRequired=lowest`），双击即可安装：
+
+- **无需管理员权限，不弹 UAC 提权**——因此不会触发"Setup was unable to create the directory … Error 5: 拒绝访问"这类提权后无法访问 `%TEMP%` 的问题。
+- 默认安装到 `%LOCALAPPDATA%\ManimbleWin`（当前用户目录），并创建桌面/开始菜单快捷方式与卸载器。
+- 适合受限环境、公司托管机器或无管理员权限的账户。
+
+如需改为全机器安装（需管理员），把 `installer.iss` 中的 `PrivilegesRequired=lowest` 改为 `admin`、`DefaultDirName` 改回 `{autopf}\{#MyAppName}` 后重新编译即可。
+
 ## 发布到 GitHub
 
 项目已配置 GitHub Actions（`.github/workflows/build.yml`），实现一键构建与自动发布：

@@ -10,6 +10,7 @@
 | 编译（Debug） | ✅ 通过 — **0 警告，0 错误** |
 | 自包含 exe 发布 | ✅ 通过 — `dist/ManimbleWin.exe`（155 MB，win-x64，含运行时） |
 | exe 安装程序 | ✅ 通过 — `Output/ManimbleWin-setup.exe`（48 MB，Inno Setup 6.7.3 编译成功） |
+| 安装程序权限修复 | ✅ 已修复 — 原默认 `PrivilegesRequired=admin` 触发 UAC 提权，在受限/沙箱环境导致 `Error 5: 拒绝访问`（无法在 `%TEMP%` 创建 `is-*.tmp`）。已改为 `PrivilegesRequired=lowest` + `{localappdata}` 用户级安装；重编译后 inner manifest 由 `requireAdministrator` 变为 `asInvoker`（静态核验确认），不再提权。 |
 | GitHub Actions 配置 | ✅ 已配置 — push/PR 构建，`v*` 标签自动 Release 附 exe 与安装包 |
 | 运行时启动 | ✅ 通过 — 进程正常启动，驻留内存约 120 MB，无崩溃 |
 | 未捕获异常日志 | ✅ 无生成（运行期间未触发异常） |
