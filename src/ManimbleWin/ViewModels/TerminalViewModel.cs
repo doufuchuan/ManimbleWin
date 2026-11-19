@@ -279,14 +279,27 @@ namespace ManimbleWin.ViewModels
                 string errText = "";
                 p.Start();
 
+                // PowerShell 的 stderr 是 CLIXML 格式，先还原成普通文本再显示
+                var clixml = new ClixmlFilter();
+
                 var outTask = PumpAsync(p.StandardOutput.BaseStream, s => Append(CleanAnsi(s), White));
                 var errTask = PumpAsync(p.StandardError.BaseStream, s =>
                 {
-                    if (s.Length > 0) errText += s + "\n";
-                    Append(CleanAnsi(s), Red);
+                    foreach (string line in clixml.Feed(s))
+                    {
+                        if (line.Length == 0) continue;
+                        errText += line + "\n";
+                        Append(CleanAnsi(line), Red);
+                    }
                 });
 
                 await Task.WhenAll(outTask, errTask);
+                foreach (string line in clixml.Flush())
+                {
+                    if (line.Length == 0) continue;
+                    errText += line + "\n";
+                    Append(CleanAnsi(line), Red);
+                }
                 await Task.Run(() => p.WaitForExit());
 
                 int code = -1;
