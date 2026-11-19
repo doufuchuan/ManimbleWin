@@ -27,3 +27,5 @@ packages/
 
 ## Publish
 publish/
+dist/
+Output/

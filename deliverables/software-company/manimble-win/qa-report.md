@@ -8,6 +8,9 @@
 | 项目 | 结果 |
 |---|---|
 | 编译（Debug） | ✅ 通过 — **0 警告，0 错误** |
+| 自包含 exe 发布 | ✅ 通过 — `dist/ManimbleWin.exe`（155 MB，win-x64，含运行时） |
+| exe 安装程序 | ✅ 通过 — `Output/ManimbleWin-setup.exe`（48 MB，Inno Setup 6.7.3 编译成功） |
+| GitHub Actions 配置 | ✅ 已配置 — push/PR 构建，`v*` 标签自动 Release 附 exe 与安装包 |
 | 运行时启动 | ✅ 通过 — 进程正常启动，驻留内存约 120 MB，无崩溃 |
 | 未捕获异常日志 | ✅ 无生成（运行期间未触发异常） |
 | 静态资源一致性 | ✅ XAML 引用的所有 StaticResource / DynamicResource 键均已定义 |
@@ -17,6 +20,13 @@
 
 - 本机原无 .NET SDK（仅 .NET Framework 4.0 运行时），为满足"可编译验证"安装了 **.NET SDK 8.0.428**（`~/.dotnet`）。
 - 构建命令：`dotnet build ManimbleWin.sln -c Debug`
+
+### dotnet 环境坑与修复（用户反馈）
+
+- 现象：用户在终端执行 `dotnet build` 报 “No .NET SDKs were found”。
+- 根因：系统 PATH 中 `C:\Program Files\dotnet\dotnet.exe` 只有运行时、无 SDK；SDK 8.0.428 实际在 `C:\Users\Administrator\.dotnet`。`DOTNET_ROOT` 无法让系统 dotnet 识别用户目录的 SDK；已新开的 shell 也不读取注册表中新增的用户 PATH。
+- 修复：① 将 `C:\Users\Administrator\.dotnet` 加入用户级 PATH 首位（对新登录会话生效）；② 提供自包含脚本 `build.ps1/.sh`、`run.ps1/.sh`，自动定位带 SDK 的 dotnet，规避任何 PATH 缓存问题（`build.ps1` 已验证：0 警告 0 错误）。
+- PowerShell 执行策略会拦截未签名脚本，README 已注明用 `powershell -ExecutionPolicy Bypass -File .\build.ps1`。
 
 ## 编译过程中发现并修复的问题
 

@@ -8,13 +8,61 @@ Manimble 的 **Windows（WPF）UI 交互原型**：高度还原 macOS 版 Manimb
 
 **环境**：Windows 10/11 + .NET 8 SDK（或 Visual Studio 2022，勾选 “.NET 桌面开发”）。
 
+> **关于 `dotnet build` 报错 “No .NET SDKs were found”**：如果你的系统 PATH 里的 `dotnet` 是纯运行时（常见于同时装过运行时与独立 SDK 的机器），裸 `dotnet build` 会失败。本项目提供自包含脚本，**自动定位带 SDK 的 dotnet**，直接用即可：
+
+```powershell
+# PowerShell（若被执行策略拦截，用：powershell -ExecutionPolicy Bypass -File .\build.ps1）
+.\build.ps1          # 一键编译
+.\run.ps1            # 编译并运行
+```
+
 ```bash
-cd ManimbleWin
+# Git Bash
+./build.sh
+./run.sh
+```
+
+也可以指定完整路径手动构建：
+
+```bash
+# Windows（PowerShell）
+& "$env:USERPROFILE\.dotnet\dotnet.exe" build ManimbleWin.sln -c Debug
+& "$env:USERPROFILE\.dotnet\dotnet.exe" run --project src/ManimbleWin/ManimbleWin.csproj
+
+# 若 SDK 装在标准位置（C:\Program Files\dotnet），直接：
 dotnet build ManimbleWin.sln -c Debug
 dotnet run --project src/ManimbleWin/ManimbleWin.csproj
 ```
 
 或在 Visual Studio 中打开 `ManimbleWin.sln`，按 F5。
+
+## 构建 exe 与安装程序
+
+无需安装 .NET SDK 也能运行——直接下载安装包（见下方 GitHub Releases，或本地构建产物）。
+
+一键产出**自包含单文件 exe**（约 155 MB，内含 .NET 运行时，目标机器无需装 .NET）：
+
+```powershell
+.\publish.ps1     # 生成 dist/ManimbleWin.exe
+```
+
+一键产出**exe 安装程序**（需先装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)，脚本 `installer.iss`）：
+
+```powershell
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+# 生成 Output/ManimbleWin-setup.exe（含桌面/开始菜单快捷方式与卸载器）
+```
+
+本机已实测：`dist/ManimbleWin.exe`（155 MB）与 `Output/ManimbleWin-setup.exe`（48 MB）均成功产出。
+
+## 发布到 GitHub
+
+项目已配置 GitHub Actions（`.github/workflows/build.yml`），实现一键构建与自动发布：
+
+- **推送到 `main` 或 PR**：自动执行 `dotnet build` 验证
+- **推送 `v*` 标签**（如 `git tag v0.4.7 && git push origin v0.4.7`）：自动发布自包含 exe + 用 Inno Setup 生成安装包，创建 GitHub Release 并附上 `ManimbleWin.exe` 与 `ManimbleWin-setup.exe`
+
+新用户从 Releases 下载 `ManimbleWin-setup.exe` 双击安装即可，无需任何开发环境。
 
 ## 已还原的界面
 
@@ -41,6 +89,12 @@ dotnet run --project src/ManimbleWin/ManimbleWin.csproj
 ```
 ManimbleWin/
 ├── ManimbleWin.sln
+├── LICENSE                    BSD 2-Clause（含原项目版权声明）
+├── build.ps1 / build.sh       一键编译（自动定位带 SDK 的 dotnet）
+├── run.ps1 / run.sh           一键运行
+├── publish.ps1 / publish.sh   一键发布自包含 exe 到 dist/
+├── installer.iss             Inno Setup 安装包脚本 → Output/
+├── .github/workflows/build.yml  CI 构建 + 标签触发 Release
 ├── src/ManimbleWin/
 │   ├── Models/        数据模型（CanvasObject / Build / Slide / DeckTheme）
 │   ├── ViewModels/    MainViewModel（全部交互逻辑）
@@ -49,9 +103,10 @@ ManimbleWin/
 │   ├── Resources/     画刷 / 样式 / 图标几何
 │   ├── MainWindow.xaml(.cs)
 │   └── App.xaml(.cs)
-├── deliverables/software-company/manimble-win/prd.md   产品需求文档
+├── deliverables/software-company/manimble-win/   PRD 与 QA 报告
 └── docs/              预留文档目录
 ```
+（dist/ 与 Output/ 为构建产物，已在 .gitignore 中排除）
 
 ## 未来对接真实引擎（不在本原型范围）
 
