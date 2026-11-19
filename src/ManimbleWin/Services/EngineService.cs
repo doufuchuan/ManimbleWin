@@ -58,18 +58,13 @@ namespace ManimbleWin.Services
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
-                // 引擎要求：PYTHONPATH 指向 engine/，MANIMBLE_PYTHON 指向有 manim 的解释器
-                psi.Environment["PYTHONPATH"] = _engineDir
-                    + (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PYTHONPATH")) ? "" : Path.PathSeparator + Environment.GetEnvironmentVariable("PYTHONPATH"));
+                // 先统一清理宿主环境（TEMP 可能不可写，PYTHONPATH 可能指向外部的
+                // sitecustomize 钩子，引擎渲染时会删中间文件，被钩子接管会直接失败）。
+                EnvironmentService.ApplyCleanTemp(psi);
+                // 引擎要求：PYTHONPATH 只指向 engine/，MANIMBLE_PYTHON 指向有 manim 的解释器。
+                psi.Environment["PYTHONPATH"] = _engineDir;
                 psi.Environment["MANIMBLE_PYTHON"] = _pythonForScenes;
                 psi.Environment["PYTHONIOENCODING"] = "utf-8";
-                // 使用应用专属临时目录，规避受限环境下用户 %TEMP% 的权限问题，
-                // 并让 manim 的中间文件集中管理。
-                string appTmp = System.IO.Path.Combine(EnvironmentService.UserDataDir, "tmp");
-                System.IO.Directory.CreateDirectory(appTmp);
-                psi.Environment["TMP"] = appTmp;
-                psi.Environment["TEMP"] = appTmp;
-                psi.Environment["TMPDIR"] = appTmp;
 
                 _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
                 _process.Exited += (s, e) => { Exited?.Invoke(); };

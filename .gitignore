@@ -41,7 +41,14 @@ engine/**/__pycache__/
 .data/
 pip-build-tracker-*/
 pip-install-*/
+pip-unpack-*/
+pip-download-*/
 pip-ephem-wheel-cache-*/
+pip-modern-metadata-*/
+
+## Manim / manim-slides 渲染产物
+samples/**/media/
+samples/**/deck/slides/
 
 ## 内部文档（产品需求 / 测试报告，不随代码发布）
 deliverables/

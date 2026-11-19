@@ -150,14 +150,36 @@ namespace ManimbleWin.Services
             }
             catch { }
 
+            // 宿主的 PYTHONPATH / PYTHONHOME 会被子解释器全盘继承，把外部 sitecustomize
+            // 之类的钩子塞进 venv（有些钩子会接管 open/unlink，表现为 pip "装到一半不动"）。
+            // 应用只认自己建的 venv，所以这些变量一律清掉。
+            TryRemoveEnv(psi, "PYTHONPATH");
+            TryRemoveEnv(psi, "PYTHONHOME");
+            TryRemoveEnv(psi, "PYTHONSTARTUP");
+            TryRemoveEnv(psi, "PYTHONEXECUTABLE");
+            TryRemoveEnv(psi, "PYTHONUSERBASE");
+            TryRemoveEnv(psi, "PIP_INDEX_URL");
+            TryRemoveEnv(psi, "PIP_EXTRA_INDEX_URL");
+
             try
             {
                 psi.Environment["PYTHONUTF8"] = "1";
                 psi.Environment["PYTHONIOENCODING"] = "utf-8";
+                // 用户级 site-packages 不参与，避免半装的第三方包干扰引擎。
+                psi.Environment["PYTHONNOUSERSITE"] = "1";
                 psi.Environment["PIP_DISABLE_PIP_VERSION_CHECK"] = "1";
                 psi.Environment["PIP_NO_INPUT"] = "1";
+                // %LOCALAPPDATA%\pip\cache 在受限环境里不可写，pip 会卡在写缓存上。
+                string cache = Path.Combine(UserDataDir, "pipcache");
+                Directory.CreateDirectory(cache);
+                psi.Environment["PIP_CACHE_DIR"] = cache;
             }
             catch { }
+        }
+
+        private static void TryRemoveEnv(ProcessStartInfo psi, string key)
+        {
+            try { psi.Environment.Remove(key); } catch { }
         }
 
         /// <summary>运行命令，返回 (退出码, 合并输出)。超时返回 -1。</summary>

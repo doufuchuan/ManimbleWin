@@ -71,13 +71,25 @@ dotnet run --project src/ManimbleWin/ManimbleWin.csproj
 手动安装（等价于依赖中心的“一键安装”）：
 
 ```powershell
-# 1) 创建虚拟环境（放在 %LOCALAPPDATA%\ManimbleWin\venv）
-py -3.12 -m venv "$env:LOCALAPPDATA\ManimbleWin\venv"
-# 2) 安装 Manim 栈
-& "$env:LOCALAPPDATA\ManimbleWin\venv\Scripts\python.exe" -m pip install -r engine\requirements.txt
-# 3) LaTeX：安装 TinyTeX 后补装宏包
-"$env:LOCALAPPDATA\ManimbleWin\venv\Scripts\python.exe" -c "import manim; print(manim.__version__)"
+# 1) 创建虚拟环境（项目内 .venv；写不进去时回落到 %LOCALAPPDATA%\ManimbleWin\venv）
+py -3.12 -m venv .venv
+# 2) 安装 Manim 栈（国内建议加 -i https://pypi.tuna.tsinghua.edu.cn/simple）
+& .\.venv\Scripts\python.exe -m pip install -r engine\requirements.txt
+# 3) 验证
+& .\.venv\Scripts\python.exe -c "import manim, manim_slides; print(manim.__version__)"
 ```
+
+### 安装卡住时
+
+`pip` 下载完所有包之后会进入“安装已收集的包”阶段，这期间**长时间零输出是正常的**（60 多个包要写盘），几分钟内别关窗口。
+
+如果确实停住不动，多半是下面两种环境问题，应用内已自动规避，手动安装时可以照着排查：
+
+- **`%TEMP%` 不可写**：pip 要在临时目录里建 `pip-unpack-*`，权限被拦就会一直重试。把 `TMP`/`TEMP`/`TMPDIR` 指到一个可写目录。
+- **宿主设置了 `PYTHONPATH`**：会被 venv 里的解释器继承，把外部的 `sitecustomize` 钩子带进来接管文件操作，pip 覆盖文件时会直接异常退出。执行前 `set PYTHONPATH=`（PowerShell 用 `$env:PYTHONPATH=""`）清掉。
+
+应用启动的所有 Python 子进程（引擎、pip）都会清掉 `PYTHONPATH`/`PYTHONHOME` 并把临时目录、pip 缓存指到可写位置，所以从 IDE 或带环境变量的终端里启动也不会踩到这两个坑。
+
 
 引擎通信实现见 `src/ManimbleWin/Services/EngineService.cs`，数据映射见 `ViewModels/EngineIntegration.cs`。
 

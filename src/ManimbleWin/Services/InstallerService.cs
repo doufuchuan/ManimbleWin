@@ -103,12 +103,16 @@ namespace ManimbleWin.Services
             }
 
             log("安装 Manim 及其依赖（首次可能需数分钟，请保持网络畅通）…", false);
+            log("提示：下载完成后的“安装已收集的包”阶段 pip 会长时间不输出任何内容，这是正常的，请勿关闭窗口。", false);
             bool installed = await PipInstall(targetPython, $"-r \"{req}\"", log);
             if (!installed)
             {
                 log("依赖安装失败。常见原因：网络中断、PyPI 不可达、缺少编译工具。可换镜像或稍后重试。", true);
+                log("也可在“终端”标签里手动执行：", false);
+                log($"  \"{targetPython}\" -m pip install -r \"{req}\" -i {MirrorUrl}", false);
                 return false;
             }
+            CleanupPipLeftovers();
 
             // 验证
             var check = EnvironmentService.RunCapture(targetPython,
@@ -211,6 +215,29 @@ namespace ManimbleWin.Services
             };
             foreach (var k in keys) if (output.Contains(k)) return true;
             return false;
+        }
+
+        /// <summary>
+        /// 清掉 pip 在应用临时目录里留下的构建/解包残留。pip 每次被打断都会留一堆
+        /// pip-build-tracker-*、pip-unpack-* 目录，攒多了既占空间也会拖慢下一次安装。
+        /// 只清应用自己的 TempDir，不碰系统目录。
+        /// </summary>
+        private static void CleanupPipLeftovers()
+        {
+            try
+            {
+                string dir = EnvironmentService.TempDir;
+                if (!Directory.Exists(dir)) return;
+                string[] patterns = { "pip-build-tracker-*", "pip-download-*", "pip-unpack-*", "pip-ephem-wheel-cache-*", "pip-install-*", "pip-modern-metadata-*" };
+                foreach (var pat in patterns)
+                {
+                    foreach (var d in Directory.EnumerateDirectories(dir, pat))
+                    {
+                        try { Directory.Delete(d, true); } catch { }
+                    }
+                }
+            }
+            catch { }
         }
 
         /// <summary>为检测到的 LaTeX 安装 Manim 所需宏包（通过 tlmgr 或 winget/choco）。</summary>
