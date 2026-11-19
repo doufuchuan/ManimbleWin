@@ -461,7 +461,8 @@ namespace ManimbleWin.ViewModels
             _engine = new EngineIntegration(this);
             _engine.Log += msg => ShowToast(msg);
 
-            // 坐标写回引擎的节流器（拖动停手 0.7 秒后提交一次）            _engineSync = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            // 坐标写回引擎的节流器（拖动停手 0.7 秒后提交一次）
+            _engineSync = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
             _engineSync.Tick += async (s, e) =>
             {
                 _engineSync.Stop();
@@ -1068,7 +1069,11 @@ namespace ManimbleWin.ViewModels
                 case "DarkModeApp": IsDarkMode = !IsDarkMode; break;
                 case "InvertColors": ShowToast("反色 — 原型模式"); break;
                 case "ShowTerminal": ShowTerminalPanel(); break;
-                case "NewTerminal": ShowTerminalPanel(); Terminal.ResetSession(); ShowToast("已新建终端会话"); break;
+                case "NewTerminal":
+                    ShowTerminalPanel();
+                    var fresh = Terminal.NewSession(null);
+                    ShowToast("已新建终端标签：" + fresh.Title + "（与原标签互不影响）");
+                    break;
                 case "CloseTerminal": TerminalVisible = false; break;
                 case "ToggleNavigator": NavigatorVisible = !NavigatorVisible; break;
                 case "ToggleInspector": InspectorVisible = !InspectorVisible; break;

@@ -14,6 +14,15 @@ namespace ManimbleWin
             PreviewKeyDown += MainWindow_PreviewKeyDown;
         }
 
+        /// <summary>点「+」弹出 CMD / PowerShell 选择（ContextMenu 默认只在右键弹出）。</summary>
+        private void NewTabButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button btn || btn.ContextMenu == null) return;
+            btn.ContextMenu.PlacementTarget = btn;
+            btn.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            btn.ContextMenu.IsOpen = true;
+        }
+
         private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
         {
             if (!(DataContext is MainViewModel vm)) return;

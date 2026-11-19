@@ -6,12 +6,12 @@ Manimble 的 **Windows（WPF）桌面版**：高度还原 macOS 版 Manimble 的
 
 ## 能力
 
-- **真实 Manim 渲染**：内置 `engine/manimble`，WPF 启动 `python -m manimble.rpc` 子进程，按 `docs/developers/protocol.md` 的 JSON-lines 协议通信；画布显示引擎渲染出的真实帧（`state` / `scene`）。
+- **真实 Manim 渲染**：内置 `engine/manimble`，WPF 启动 `python -m manimble.rpc` 子进程，按 `engine/manimble/rpc.py` 中定义的 JSON-lines 协议通信；画布显示引擎渲染出的真实帧（`state` / `scene`）。
 - **LaTeX 公式渲染**：公式对象通过引擎 `sprite` 命令（kind=tex）生成由 LaTeX 排版的真实 PNG。
 - **源码双向编辑**：右下角代码窗格可直接编辑当前页 Python 源码；点击“应用”（或 Ctrl+S）经引擎 `edit_source` 写回工作副本并重渲染，未连接引擎时保存到本地。
 - **对象操作写回代码**：插入文本/公式/形状/图片/表格等操作由 `SourceCodeGenerator` 翻译成 Manim 代码并同步到源码窗格；连接引擎时经 `insert` / `edit_source` 真正写回。
 - **动画预览**：`播放` 菜单可打开独立预览窗口，按 build 逐帧播放（真实引擎帧或本地对象帧），支持播放/暂停、上一帧/下一帧、进度，ESC 退出；连接引擎后走 `present` / `export_movie` 生成真实片段与 MP4。
-- **可交互终端**：底部抽屉的“终端”是可输入命令的真实终端（`help` / `slides` / `insert` / `render` / `play` / `connect` / `claude` 等），↑↓ 翻历史、回车执行。
+- **可交互终端**：调用本机真实的 `cmd.exe` / `powershell.exe`（`:help` / `:slides` / `:insert` / `:render` / `:play` / `:connect` 等应用内命令，Windows 命令直接敲），↑↓ 翻历史、回车执行；每个标签是独立会话，互不影响。
 - **依赖检测与引导**：首次启动弹出环境准备向导，菜单 `引擎 › 依赖中心` 随时可打开，检测 Python / Manim / FFmpeg / LaTeX 状态并引导安装；Manim 栈可一键安装到项目独立虚拟环境。
 - **全中文界面**：菜单、工具栏、面板、提示均为中文（Python 代码、快捷键与 Manim/LaTeX 等专有名词保留原文）。
 - **原型交互保留**：未连接引擎时自动回退到本地示例数据，界面与全部点击交互仍可用，便于无 Python 环境时演示。
@@ -127,7 +127,7 @@ py -3.12 -m venv "$env:LOCALAPPDATA\ManimbleWin\venv"
 - **演示程序内置 manim 动画**：示例 deck 新增 `Animation` 场景（Write / Create / Transform / Indicate），本地演示稿也新增同名动画页；`common.py` 在 Windows 下改用 `Segoe UI`，避免缺字体渲染失败。
 - **拖动写回代码坐标**：拖动对象（或方向键微调）松手后，自动把 `move_to((x, y, 0))` 写回源码对应行；行内没有 `move_to` 会追加一个；由 `self.play/self.add/VGroup().arrange` 摆放的对象会提示「由剧本语句摆放」，不会硬改坏代码。引擎已连接时再节流回写到工作副本。
 - **Python 语法高亮**：代码面板改为 RichTextBox + 自研 tokenizer（关键字/字符串/注释/数字/内置名/Manim 类名/装饰器/def 名），带行号、滚动同步、Tab 缩进、回车自动缩进、Ctrl+Z/Y 撤销重做。
-- **终端可打开**：终端改为覆盖在画布上的独立面板（工具栏「终端」/ 菜单「显示终端」/ `Ctrl+\`` 均可打开，Esc 关闭），底部抽屉的终端标签保留；打开抽屉时会修复被拖成 0 的高度。
+- **终端多标签（VSCode 式）**：终端停靠在中栏底部（工具栏「终端」/ 菜单「显示终端」/ `Ctrl+\`` 打开，Esc 关闭），不再是盖住画布的浮层。标签栏里每个标签是一个**独立会话**：各自的 `cmd.exe` / `powershell.exe`、工作目录、命令历史、输出缓冲和运行状态。切标签只是换显示对象，不会重启进程、不会清屏，后台标签里正在跑的命令会继续跑并只写自己的缓冲；`+` 新建标签（可选 CMD / PowerShell，沿用当前目录），标签上的 `✕` 只关自己，运行中的标签标题带 `●`。
 
 ## 已还原的界面
 
@@ -168,14 +168,16 @@ ManimbleWin/
 │   ├── Resources/     画刷 / 样式 / 图标几何
 │   ├── MainWindow.xaml(.cs)
 │   └── App.xaml(.cs)
-├── deliverables/software-company/manimble-win/   PRD 与 QA 报告
-└── docs/              预留文档目录
+├── engine/
+│   ├── manimble/       原版 Python 引擎（场景渲染 / LaTeX / 导出 / JSON-lines RPC）
+│   └── requirements.txt
+└── samples/hello/      示例 deck（deck/slides.py、deck/common.py）
 ```
 （dist/ 与 Output/ 为构建产物，已在 .gitignore 中排除）
 
 ## 未来对接真实引擎（不在本原型范围）
 
-原版 `apps/windows/README.md` 已给出路线：Windows 前端作为共享 Python 引擎的第二个客户端，通过 JSON-lines 协议（`docs/developers/protocol.md`）通信。本原型中 `MainViewModel.ExecuteMenu()` 的每个 action 均注释了对应的引擎 `cmd`（open/state/scene/edit/insert/slide/notes/undo/redo/present/export…），可作为对接锚点。工作副本管理需实现“打开副本 → 编辑 → 写回原始 deck”。
+原版 `apps/windows/README.md` 已给出路线：Windows 前端作为共享 Python 引擎的第二个客户端，通过 JSON-lines 协议（原仓库的 `docs/developers/protocol.md`）通信。本原型中 `MainViewModel.ExecuteMenu()` 的每个 action 均注释了对应的引擎 `cmd`（open/state/scene/edit/insert/slide/notes/undo/redo/present/export…），可作为对接锚点。工作副本管理需实现“打开副本 → 编辑 → 写回原始 deck”。
 
 ## 配色来源
 

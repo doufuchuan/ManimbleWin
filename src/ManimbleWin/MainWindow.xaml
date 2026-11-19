@@ -423,20 +423,59 @@
                                 BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}">
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <TextBlock Text="终端" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,10,0"/>
-                                    <RadioButton Content="CMD" Style="{StaticResource DrawerTabButton}" FontSize="10.5"
-                                                 IsChecked="{Binding Terminal.IsCmd, Mode=OneWay}"
-                                                 Command="{Binding Terminal.SetShellCommand}" CommandParameter="cmd"/>
-                                    <RadioButton Content="PowerShell" Style="{StaticResource DrawerTabButton}" FontSize="10.5" Margin="4,0,0,0"
-                                                 IsChecked="{Binding Terminal.IsPwsh, Mode=OneWay}"
-                                                 Command="{Binding Terminal.SetShellCommand}" CommandParameter="powershell"/>
-                                    <TextBlock Text="{Binding Terminal.DirectoryLabel}" FontFamily="Consolas" FontSize="10.5"
+                                    <TextBlock Text="终端" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,8,0"/>
+
+                                    <!-- 终端标签栏：一个标签 = 一个独立会话（各自的工作目录 / 输出 / 历史 / 进程） -->
+                                    <ItemsControl ItemsSource="{Binding Terminal.Sessions}" VerticalAlignment="Center">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <RadioButton Style="{StaticResource DrawerTabButton}" FontSize="10.5"
+                                                             Padding="8,5,6,5"
+                                                             IsChecked="{Binding IsActive, Mode=OneWay}"
+                                                             Command="{Binding DataContext.Terminal.SelectSessionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                             CommandParameter="{Binding}"
+                                                             ToolTip="{Binding CurrentDirectory}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="{Binding TabTitle}" FontFamily="Consolas" VerticalAlignment="Center"/>
+                                                        <Button Style="{StaticResource TabCloseButton}" Margin="5,0,0,0"
+                                                                Command="{Binding DataContext.Terminal.CloseSessionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                                CommandParameter="{Binding}"
+                                                                ToolTip="关闭这个终端（其他标签不受影响）"/>
+                                                    </StackPanel>
+                                                </RadioButton>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <!-- 新建标签：点一下选 CMD / PowerShell -->
+                                    <Button x:Name="NewTabButton" Style="{StaticResource ToolIconButton}" Width="22" Height="22" Margin="2,0,0,0"
+                                            FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"
+                                            Content="+" ToolTip="新建终端（可选择 CMD 或 PowerShell）"
+                                            Click="NewTabButton_Click">
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="CMD"
+                                                          Command="{Binding PlacementTarget.DataContext.Terminal.NewSessionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="cmd"/>
+                                                <MenuItem Header="PowerShell"
+                                                          Command="{Binding PlacementTarget.DataContext.Terminal.NewSessionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="powershell"/>
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+
+                                    <TextBlock Text="{Binding Terminal.Active.CurrentDirectory}" FontFamily="Consolas" FontSize="10.5"
                                                Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"
-                                               Margin="10,0,0,0" MaxWidth="380" TextTrimming="CharacterEllipsis"
-                                               ToolTip="{Binding Terminal.DirectoryLabel}"/>
+                                               Margin="10,0,0,0" MaxWidth="360" TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding Terminal.Active.CurrentDirectory}"/>
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Terminal.StatusText}" FontSize="10" VerticalAlignment="Center"
+                                    <TextBlock Text="{Binding Terminal.Active.StatusText}" FontSize="10" VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,8,0"/>
                                     <Button Content="停止" Style="{StaticResource ToolTextButton}" FontSize="10" Padding="8,2" Height="21"
                                             Command="{Binding Terminal.CancelCommand}" ToolTip="中断正在运行的命令（Ctrl+C）"/>

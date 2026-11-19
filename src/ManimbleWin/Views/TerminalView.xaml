@@ -2,12 +2,12 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Background="{DynamicResource CodeBackgroundBrush}">
-    <!-- 只有输出区：提示符与输入行就是输出流的最后一行，点任意位置即可输入 -->
+    <!-- 只显示当前标签这一个会话：提示符与输入行就是它自己输出流的最后一行 -->
     <ScrollViewer x:Name="OutputScroll" VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled" Padding="12,8,12,8"
                   MouseDown="OutputScroll_MouseDown" Background="Transparent">
         <StackPanel>
-            <ItemsControl ItemsSource="{Binding Terminal.Lines}">
+            <ItemsControl ItemsSource="{Binding Terminal.Active.Lines}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground, Converter={StaticResource StrBrush}}"
@@ -23,13 +23,13 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding Terminal.PromptText}" Foreground="#33FF66" FontFamily="Consolas"
+                <TextBlock Text="{Binding Terminal.Active.PromptText}" Foreground="#33FF66" FontFamily="Consolas"
                            FontSize="11.5" VerticalAlignment="Top" Margin="0,0,6,0"/>
                 <TextBox x:Name="InputBox" Grid.Column="1" Background="Transparent"
                          Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0" Padding="0"
                          FontFamily="Consolas" FontSize="11.5" CaretBrush="#33FF66"
                          TextWrapping="Wrap" AcceptsReturn="False"
-                         Text="{Binding Terminal.Input, UpdateSourceTrigger=PropertyChanged}"
+                         Text="{Binding Terminal.Active.Input, UpdateSourceTrigger=PropertyChanged}"
                          KeyDown="InputBox_KeyDown"/>
             </Grid>
         </StackPanel>

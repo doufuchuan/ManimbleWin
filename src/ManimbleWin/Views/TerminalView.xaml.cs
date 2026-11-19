@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -19,20 +18,42 @@ namespace ManimbleWin.Views
             {
                 if (!IsVisible) return;
                 Hook(DataContext as MainViewModel);
+                ScrollToEnd();
                 InputBox.Focus();
-                OutputScroll.ScrollToEnd();
             };
             Unloaded += (s, e) => Hook(null);
         }
 
         private void Hook(MainViewModel vm)
         {
-            if (_term != null) _term.Lines.CollectionChanged -= OnLinesChanged;
+            if (_term != null)
+            {
+                _term.OutputChanged -= OnOutputChanged;
+                _term.ActiveChanged -= OnActiveChanged;
+            }
             _term = vm?.Terminal;
-            if (_term != null) _term.Lines.CollectionChanged += OnLinesChanged;
+            if (_term != null)
+            {
+                _term.OutputChanged += OnOutputChanged;
+                _term.ActiveChanged += OnActiveChanged;
+            }
         }
 
-        private void OnLinesChanged(object sender, NotifyCollectionChangedEventArgs e)
+        /// <summary>当前会话有新输出。</summary>
+        private void OnOutputChanged() => ScrollToEnd();
+
+        /// <summary>切了标签：滚到新会话自己的末尾，并把焦点交给输入行。</summary>
+        private void OnActiveChanged()
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ScrollToEnd();
+                InputBox.Focus();
+                InputBox.CaretIndex = InputBox.Text.Length;
+            }));
+        }
+
+        private void ScrollToEnd()
         {
             Dispatcher.BeginInvoke(new Action(() =>
             {
@@ -50,13 +71,13 @@ namespace ManimbleWin.Views
 
         private void InputBox_KeyDown(object sender, KeyEventArgs e)
         {
-            if (DataContext is not MainViewModel vm) return;
+            if (DataContext is not MainViewModel vm || vm.Terminal.Active == null) return;
             var term = vm.Terminal;
 
             if (e.Key == Key.Enter)
             {
                 term.Submit();
-                OutputScroll.ScrollToEnd();
+                ScrollToEnd();
                 e.Handled = true;
             }
             else if (e.Key == Key.Up)

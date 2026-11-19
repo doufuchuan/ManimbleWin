@@ -42,3 +42,7 @@ engine/**/__pycache__/
 pip-build-tracker-*/
 pip-install-*/
 pip-ephem-wheel-cache-*/
+
+## 内部文档（产品需求 / 测试报告，不随代码发布）
+deliverables/
+docs/internal/
