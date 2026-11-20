@@ -67,9 +67,13 @@ def changes(h: str, mode: str = "dark") -> bool:
 
 
 def _cfg_background(deck: str):
-    """(path, text, (start, end) of the value or None, value) for manim.cfg's [CLI] background_color."""
+    """(path, text, (start, end) of the value or None, value) for manim.cfg's [CLI] background_color.
+
+    Read as bytes and decode here, not with open(encoding=...): text mode turns CRLF into LF, and the offsets
+    below are byte offsets into the file on disk. On Windows (manim.cfg written with \\r\\n) that mismatch shifted
+    every edit one byte per preceding line and mangled the value ("background_color =#FFFFFF0")."""
     path = os.path.join(deck, "manim.cfg")
-    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    text = open(path, "rb").read().decode("utf-8") if os.path.exists(path) else ""
     section = None
     pos = 0                                        # byte offset of the line (Edit offsets are bytes)
     for line in text.splitlines(keepends=True):

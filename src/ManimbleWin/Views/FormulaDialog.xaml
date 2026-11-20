@@ -19,8 +19,7 @@
                  Style="{StaticResource FieldInput}" FontFamily="Consolas" FontSize="13"
                  AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
                  VerticalContentAlignment="Top"
-                 TextChanged="Input_TextChanged" KeyDown="Input_KeyDown"
-                 Text="e^{i\pi}+1=0"/>
+                 TextChanged="Input_TextChanged" KeyDown="Input_KeyDown"/>
 
         <WrapPanel Grid.Row="2" Margin="0,0,0,10">
             <Button Style="{StaticResource ToolTextButton}" Content="\frac{a}{b}" Tag="\frac{a}{b}" Click="Snippet_Click" Height="26" Padding="8,2" Margin="0,0,6,6"/>

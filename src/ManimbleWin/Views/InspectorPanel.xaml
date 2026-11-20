@@ -55,6 +55,15 @@
                                FontSize="10.5" TextWrapping="Wrap"/>
                 </StackPanel>
 
+                <!-- 图片对象：更换图片（仅引擎连接时可用，未连给提示） -->
+                <StackPanel Visibility="{Binding SelectedObject.Kind, Converter={StaticResource KindIsImage}}" Margin="0,0,0,10">
+                    <Button Content="更换图片…" Command="{Binding ReplaceImageCommand}"
+                            Style="{StaticResource AccentButton}" Padding="10,5" FontSize="11" HorizontalAlignment="Left"
+                            ToolTip="为当前图片对象选择一张新图片（走引擎，一步撤销）"/>
+                    <TextBlock Text="{Binding SelectedObject.ImageLabel}" Foreground="{DynamicResource TextSecondaryBrush}"
+                               FontSize="10.5" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                </StackPanel>
+
                 <!-- 外观 -->
                 <TextBlock Text="外观" Style="{StaticResource PanelHeader}"/>
                 <Grid Margin="0,0,0,8">

@@ -23,6 +23,9 @@
         <KeyBinding Key="T" Modifiers="Control+Shift" Command="{Binding MenuCommand}" CommandParameter="InsertText"/>
         <KeyBinding Key="N" Modifiers="Control+Shift" Command="{Binding MenuCommand}" CommandParameter="NewSlide"/>
         <KeyBinding Key="D" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="DuplicateSlide"/>
+        <!-- 演示文稿配色（改 deck 源码，与「界面深色」无关） -->
+        <KeyBinding Key="D" Modifiers="Control+Alt" Command="{Binding MenuCommand}" CommandParameter="DeckDark"/>
+        <KeyBinding Key="I" Modifiers="Control+Alt" Command="{Binding MenuCommand}" CommandParameter="DeckInvert"/>
         <KeyBinding Key="Left" Command="{Binding NudgeCommand}" CommandParameter="Left"/>
         <KeyBinding Key="Right" Command="{Binding NudgeCommand}" CommandParameter="Right"/>
         <KeyBinding Key="Up" Command="{Binding NudgeCommand}" CommandParameter="Up"/>
@@ -72,6 +75,7 @@
                 <MenuItem Header="文本" Command="{Binding MenuCommand}" CommandParameter="InsertText" InputGestureText="Ctrl+Shift+T"/>
                 <MenuItem Header="公式…" Command="{Binding MenuCommand}" CommandParameter="InsertFormula" InputGestureText="Ctrl+Shift+E"/>
                 <MenuItem Header="图片…" Command="{Binding MenuCommand}" CommandParameter="InsertImage" InputGestureText="Ctrl+Shift+I"/>
+                <MenuItem Header="提取图片…" Command="{Binding ExtractImagesCommand}"/>
                 <MenuItem Header="表格" Command="{Binding MenuCommand}" CommandParameter="InsertTable"/>
                 <MenuItem Header="形状">
                     <MenuItem Header="矩形" Command="{Binding MenuCommand}" CommandParameter="InsertShape"/>
@@ -102,14 +106,28 @@
                 <MenuItem Header="右对齐" Command="{Binding MenuCommand}" CommandParameter="AlignRight" InputGestureText="Ctrl+R"/>
                 <Separator/>
                 <MenuItem Header="主题…" Command="{Binding MenuCommand}" CommandParameter="Theme"/>
-                <MenuItem Header="对演示文稿应用深色模式" Command="{Binding MenuCommand}" CommandParameter="InvertColors"/>
-                <MenuItem Header="设置背景格式…" Command="{Binding MenuCommand}" CommandParameter="Background"/>
+                <MenuItem Header="对演示文稿应用深色模式…" Command="{Binding MenuCommand}" CommandParameter="DeckDark"/>
+                <MenuItem Header="对演示文稿应用反色…" Command="{Binding MenuCommand}" CommandParameter="DeckInvert"/>
+                <MenuItem Header="背景与页码…" Command="{Binding MenuCommand}" CommandParameter="SlideSetup"/>
             </MenuItem>
             <MenuItem Header="排列">
                 <MenuItem Header="置于顶层" Command="{Binding MenuCommand}" CommandParameter="Front" InputGestureText="Ctrl+Shift+F"/>
                 <MenuItem Header="上移一层" Command="{Binding MenuCommand}" CommandParameter="Forward"/>
                 <MenuItem Header="下移一层" Command="{Binding MenuCommand}" CommandParameter="Backward"/>
-                <MenuItem Header="置于底层" Command="{Binding MenuCommand}" CommandParameter="Back"/>
+                <MenuItem Header="置于底层" Command="{Binding MenuCommand}" CommandParameter="Back" InputGestureText="Ctrl+Shift+B"/>
+                <Separator/>
+                <MenuItem Header="对齐与分布">
+                    <MenuItem Header="左对齐" Command="{Binding MenuCommand}" CommandParameter="AlignLeft"/>
+                    <MenuItem Header="水平居中" Command="{Binding MenuCommand}" CommandParameter="AlignCenter"/>
+                    <MenuItem Header="右对齐" Command="{Binding MenuCommand}" CommandParameter="AlignRight"/>
+                    <Separator/>
+                    <MenuItem Header="顶端对齐" Command="{Binding MenuCommand}" CommandParameter="AlignTop"/>
+                    <MenuItem Header="垂直居中" Command="{Binding MenuCommand}" CommandParameter="AlignMiddle"/>
+                    <MenuItem Header="底端对齐" Command="{Binding MenuCommand}" CommandParameter="AlignBottom"/>
+                    <Separator/>
+                    <MenuItem Header="水平分布" Command="{Binding MenuCommand}" CommandParameter="DistributeH"/>
+                    <MenuItem Header="垂直分布" Command="{Binding MenuCommand}" CommandParameter="DistributeV"/>
+                </MenuItem>
                 <Separator/>
                 <MenuItem Header="组合" Command="{Binding MenuCommand}" CommandParameter="Group" InputGestureText="Ctrl+G"/>
                 <MenuItem Header="取消组合" Command="{Binding MenuCommand}" CommandParameter="Ungroup" InputGestureText="Ctrl+Shift+G"/>
@@ -121,8 +139,11 @@
                 <MenuItem Header="吸附到对象" IsCheckable="True" IsChecked="{Binding SnapToObjects}" InputGestureText="Alt+Ctrl+S"/>
                 <Separator/>
                 <MenuItem Header="演讲者备注" Command="{Binding MenuCommand}" CommandParameter="SpeakerNotes" InputGestureText="Alt+Ctrl+K"/>
-                <MenuItem Header="深色模式（应用）" IsCheckable="True" IsChecked="{Binding IsDarkMode}"/>
-                <MenuItem Header="反色" Command="{Binding MenuCommand}" CommandParameter="InvertColors" InputGestureText="Ctrl+Shift+Ctrl+I"/>
+                <!-- 只改应用界面：不动 deck 源码 -->
+                <MenuItem Header="界面深色" IsCheckable="True" IsChecked="{Binding IsDarkMode}"/>
+                <!-- 改演示文稿本身：走引擎 darkmode，把颜色映射写进源码（一步撤销） -->
+                <MenuItem Header="演示文稿深色模式…" Command="{Binding MenuCommand}" CommandParameter="DeckDark" InputGestureText="Ctrl+Alt+D"/>
+                <MenuItem Header="演示文稿反色…" Command="{Binding MenuCommand}" CommandParameter="DeckInvert" InputGestureText="Ctrl+Alt+I"/>
                 <Separator/>
                 <MenuItem Header="放大" Command="{Binding ToolbarCommand}" CommandParameter="ZoomIn" InputGestureText="Ctrl+="/>
                 <MenuItem Header="缩小" Command="{Binding ToolbarCommand}" CommandParameter="ZoomOut" InputGestureText="Ctrl+-"/>
@@ -211,7 +232,8 @@
                             <TextBlock Text="主题" FontSize="11" Margin="5,0,0,0" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
-                    <ComboBox ItemsSource="{Binding Themes}" SelectedItem="{Binding CurrentTheme, Mode=TwoWay}" Width="132" Height="26" Margin="4,0,0,0" FontSize="11">
+                    <ComboBox x:Name="ThemeCombo" ItemsSource="{Binding Themes}" SelectedItem="{Binding CurrentTheme, Mode=TwoWay}" Width="132" Height="26" Margin="4,0,0,0" FontSize="11"
+                              ToolTip="deck 主题（真实色板）。选中后先预览，确认才写进 deck。" SelectionChanged="ThemeCombo_SelectionChanged">
                         <ComboBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
@@ -402,6 +424,9 @@
                     <RowDefinition Height="{Binding TerminalHeight, Mode=TwoWay}"/>
                 </Grid.RowDefinitions>
                 <views:CanvasView Grid.Row="0"/>
+
+                <!-- 查找替换浮层：浮在画布上方，Ctrl+F 打开，Esc 关闭 -->
+                <views:FindPanel Grid.Row="0"/>
                 <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="Transparent" ResizeBehavior="PreviousAndNext"
                               Visibility="{Binding DrawerVisible, Converter={StaticResource BoolToVis}}"/>
                 <views:DrawerPanel Grid.Row="2" Visibility="{Binding DrawerVisible, Converter={StaticResource BoolToVis}}"/>

@@ -58,6 +58,9 @@ namespace ManimbleWin.Views
             {
                 _debounce.Stop();
                 ThemeManager.ThemeChanged -= OnThemeChanged;
+                // 复位幂等守卫：不复位的话面板被移出再放回时，Loaded 里的 if (!_themeHooked) 会挡住重新订阅，
+                // 从此切主题再也不会给这个面板配色（QA 手工重挂载复现过）。
+                _themeHooked = false;
             };
         }
 

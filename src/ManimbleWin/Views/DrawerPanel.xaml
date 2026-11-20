@@ -33,17 +33,17 @@
         <!-- 标签内容 -->
         <Grid Grid.Row="1">
             <TextBox Visibility="{Binding SelectedDrawerTab, Converter={StaticResource IndexToVis}, ConverterParameter=0}"
-                     Text="{Binding SlideNotesText, UpdateSourceTrigger=PropertyChanged}"
+                     Text="{Binding SlideNotesText, UpdateSourceTrigger=PropertyChanged}" LostFocus="Notes_LostFocus"
                      AcceptsReturn="True" TextWrapping="Wrap" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
                      BorderThickness="0" Padding="12,10" FontSize="12" VerticalScrollBarVisibility="Auto"/>
 
             <TextBox Visibility="{Binding SelectedDrawerTab, Converter={StaticResource IndexToVis}, ConverterParameter=1}"
-                     Text="{Binding BuildNotesText, UpdateSourceTrigger=PropertyChanged}"
+                     Text="{Binding BuildNotesText, UpdateSourceTrigger=PropertyChanged}" LostFocus="Notes_LostFocus"
                      AcceptsReturn="True" TextWrapping="Wrap" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
                      BorderThickness="0" Padding="12,10" FontSize="12" VerticalScrollBarVisibility="Auto"/>
 
             <TextBox Visibility="{Binding SelectedDrawerTab, Converter={StaticResource IndexToVis}, ConverterParameter=2}"
-                     Text="{Binding AltTextText, UpdateSourceTrigger=PropertyChanged}"
+                     Text="{Binding AltTextText, UpdateSourceTrigger=PropertyChanged}" LostFocus="Notes_LostFocus"
                      AcceptsReturn="True" TextWrapping="Wrap" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
                      BorderThickness="0" Padding="12,10" FontSize="12" VerticalScrollBarVisibility="Auto"/>
 

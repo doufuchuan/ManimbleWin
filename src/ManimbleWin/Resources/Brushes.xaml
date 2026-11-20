@@ -1,7 +1,7 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- 全部画刷用 x:Shared="false" 会导致 DynamicResource 失效，故保持共享；
-         ThemeManager.Apply() 直接修改这些画刷的 Color 实现即时切换 -->
+         ThemeManager.Apply() 负责切换：未冻结时就地改色，被冻结时替换实例（再靠 DynamicResource 重新取值） -->
 
     <SolidColorBrush x:Key="AccentBrush" Color="#FF6C0C"/>
     <SolidColorBrush x:Key="AccentSoftBrush" Color="#2EFF6C0C"/>
@@ -12,6 +12,11 @@
     <SolidColorBrush x:Key="CodeBackgroundBrush" Color="#1B1B1B"/>
     <SolidColorBrush x:Key="CanvasTopBrush" Color="#262626"/>
     <SolidColorBrush x:Key="CanvasBottomBrush" Color="#141414"/>
+    <!-- 画布底色渐变的两个停靠点（Views/CanvasView.xaml）绑的是下面这两条 Color 资源，不是画刷实例：
+         Color 是值类型，不会被 WPF 冻结，ThemeManager 直接替换值即可；而绑定到画刷实例的 Color 属性
+         会在 ThemeManager 换成新画刷实例后继续指着旧实例，色值就永远不更新。 -->
+    <Color x:Key="CanvasTopColor">#262626</Color>
+    <Color x:Key="CanvasBottomColor">#141414</Color>
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F5F5F5"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#AEAEAE"/>
     <SolidColorBrush x:Key="ChromeBackgroundBrush" Color="#1E1E1E"/>
@@ -30,9 +35,4 @@
     <SolidColorBrush x:Key="WhiteBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="DangerBrush" Color="#E5484D"/>
     <SolidColorBrush x:Key="SuccessBrush" Color="#30A46C"/>
-
-    <LinearGradientBrush x:Key="CanvasGradientBrush" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="{Binding Source={StaticResource CanvasTopBrush}, Path=Color}" Offset="0"/>
-        <GradientStop Color="{Binding Source={StaticResource CanvasBottomBrush}, Path=Color}" Offset="1"/>
-    </LinearGradientBrush>
 </ResourceDictionary>

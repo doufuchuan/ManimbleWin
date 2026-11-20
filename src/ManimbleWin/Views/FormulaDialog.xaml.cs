@@ -14,6 +14,9 @@ namespace ManimbleWin.Views
     {
         private readonly DispatcherTimer _debounce;
 
+        /// <summary>输入框的默认公式（原来写在 XAML 的 Text 上，会和 InitialExpression 两处争抢初值）。</summary>
+        private const string DefaultExpression = "e^{i\\pi}+1=0";
+
         public string Expression { get; private set; }
 
         /// <summary>打开前赋值：用于编辑已有公式（而不是新建）。</summary>
@@ -21,16 +24,22 @@ namespace ManimbleWin.Views
 
         public FormulaDialog()
         {
-            InitializeComponent();
+            // 必须先建好 _debounce 再 InitializeComponent()：
+            // TextBox 在加载期间就可能触发 TextChanged（XAML 里的 Text、样式里设的 Text、控件内部文本归一化都算），
+            // 那时 _debounce 若还是 null，Input_TextChanged 第一行 Stop() 就是一场「打开即崩」的 NRE。
             _debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
             _debounce.Tick += async (s, e) =>
             {
                 _debounce.Stop();
                 await PreviewAsync();
             };
+
+            InitializeComponent();
+
             Loaded += (s, e) =>
             {
-                if (!string.IsNullOrEmpty(InitialExpression)) Input.Text = InitialExpression;
+                // 初值只有一个来源：调用方给的 InitialExpression，否则用默认示例公式
+                Input.Text = string.IsNullOrEmpty(InitialExpression) ? DefaultExpression : InitialExpression;
                 Input.Focus();
                 Input.CaretIndex = Input.Text.Length;
                 _debounce.Start();
@@ -82,6 +91,8 @@ namespace ManimbleWin.Views
 
         private void Input_TextChanged(object sender, TextChangedEventArgs e)
         {
+            // 加载期间 TextBox 自己也可能触发 TextChanged，此时 _debounce 未必就绪（见构造函数注释）
+            if (_debounce == null) return;
             _debounce.Stop();
             _debounce.Start();
         }

@@ -27,9 +27,19 @@ namespace ManimbleWin.Models
         private bool _shared;
         private string _shapeLabel = "";
         private string _imageLabel = "";
+        private string _imagePath = "";
         private string _loc = "slides.py:1";
         private string _spritePath = "";
         private string _codeId = "";
+        private string _groupId = "";
+
+        /// <summary>
+        /// 组合标识。原型模式下引擎不参与，组合关系只存在于应用内：
+        /// 同一 GroupId 的对象一起选中、一起移动；连接引擎后组合由源码里的 Group(...) 表达。
+        /// </summary>
+        public string GroupId { get => _groupId; set { _groupId = value; Notify(nameof(GroupId)); Notify(nameof(IsGrouped)); } }
+
+        public bool IsGrouped => !string.IsNullOrEmpty(_groupId);
 
         /// <summary>写进源码注释里的稳定标识（# manimble:ab12cd），用于精确找回对象对应的代码行。</summary>
         public string CodeId { get => _codeId; set { _codeId = value; Notify(nameof(CodeId)); } }
@@ -57,6 +67,16 @@ namespace ManimbleWin.Models
         public bool Shared { get => _shared; set { _shared = value; Notify(nameof(Shared)); } }
         public string ShapeLabel { get => _shapeLabel; set { _shapeLabel = value; Notify(nameof(ShapeLabel)); } }
         public string ImageLabel { get => _imageLabel; set { _imageLabel = value; Notify(nameof(ImageLabel)); } }
+
+        /// <summary>图片对象的文件路径：引擎返回的真实图片路径，或本地占位时选中的文件绝对路径。</summary>
+        public string ImagePath
+        {
+            get => _imagePath;
+            set { if (_imagePath != value) { _imagePath = value; Notify(nameof(ImagePath)); Notify(nameof(HasImage)); } }
+        }
+        /// <summary>图片路径有效且文件存在时显示真实缩略图，否则在画布上回退到图标+文件名。</summary>
+        public bool HasImage => !string.IsNullOrEmpty(_imagePath) && System.IO.File.Exists(_imagePath);
+
         public string Loc { get => _loc; set { _loc = value; Notify(nameof(Loc)); } }
 
         /// <summary>引擎 sprite 命令渲染出的该对象透明 PNG（公式=真实 LaTeX 渲染）。</summary>

@@ -40,7 +40,7 @@ namespace ManimbleWin.Services
                     return $"self.add(MathTex({RawString(tex)}, font_size={Int(o.FontSize)}, color=\"{color}\").move_to({pos}))  {MarkerOf(o)}";
 
                 case ObjectKind.Image:
-                    return $"self.add(ImageMobject(\"assets/picture.png\").scale(0.6).move_to({pos}))  {MarkerOf(o)}";
+                    return $"self.add(ImageMobject({PyPath(ImagePathOf(o))}).scale(0.6).move_to({pos}))  {MarkerOf(o)}";
 
                 case ObjectKind.Table:
                     return $"self.add(Table([[\"1\", \"2\"], [\"3\", \"4\"]]).scale(0.8).move_to({pos}))  {MarkerOf(o)}";
@@ -302,6 +302,28 @@ namespace ManimbleWin.Services
         private static string Escape(string s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n");
 
         /// <summary>
+        /// 取图片对象写进源码的相对路径：引擎/落地的 ImagePath 通常是绝对路径或含 assets/ 的路径，
+        /// 统一成正斜杠；若路径里含 assets/ 段则从最后一个 assets/ 起截取（相对 deck），否则原样保留。
+        /// 没有路径时回退到占位图，保证原型模式也生成能解析的代码。
+        /// </summary>
+        private static string ImagePathOf(CanvasObject o)
+        {
+            string p = o == null ? "" : (o.ImagePath ?? "");
+            if (string.IsNullOrWhiteSpace(p)) return "assets/picture.png";
+            p = p.Replace('\\', '/');
+            int at = p.LastIndexOf("assets/", StringComparison.OrdinalIgnoreCase);
+            if (at >= 0) return p.Substring(at);
+            return p;
+        }
+
+        /// <summary>
+        /// 把路径写成 Python 双引号字符串字面量（引擎 py_str 的等价）。
+        /// 故意不加 r/f 前缀：路径已是正斜杠、且 Escape 已正确转义 \ 与引号，
+        /// 再叠加前缀只会引入前缀与转义冲突（rr"…" 或把 \n 误当插值）。
+        /// </summary>
+        private static string PyPath(string path) => "\"" + Escape(path) + "\"";
+
+        /// <summary>
         /// 公式值可能粘着 Python 字符串外壳（例如从源码回读到的 r"x^2"），
         /// 直接再套一层 raw string 会生成 rr"…" 这种语法错误，这里先剥掉。
         /// </summary>
@@ -317,6 +339,118 @@ namespace ManimbleWin.Services
                 if (inner.Length > 0) return inner;
             }
             return t;
+        }
+
+        /// <summary>取某个对象在源码里的整行文本（按 # manimble:id 标记定位）；没有标记行返回 null。</summary>
+        public static string LineTextFor(string source, string codeId)
+        {
+            if (string.IsNullOrEmpty(source) || string.IsNullOrEmpty(codeId)) return null;
+            string tag = Marker + ":" + codeId;
+            foreach (var line in source.Replace("\r\n", "\n").Split('\n'))
+                if (line.Contains(tag)) return line;
+            return null;
+        }
+
+        /// <summary>删除某个对象对应的整行代码（画布上删掉对象时调用）。返回是否真的删掉了。</summary>
+        public static bool TryRemoveObjectLine(string source, string codeId, out string updated)
+        {
+            updated = source;
+            if (string.IsNullOrEmpty(source) || string.IsNullOrEmpty(codeId)) return false;
+            string tag = Marker + ":" + codeId;
+            var lines = source.Replace("\r\n", "\n").Split('\n').ToList();
+            int idx = lines.FindIndex(l => l.Contains(tag));
+            if (idx < 0) return false;
+            lines.RemoveAt(idx);
+            updated = string.Join("\n", lines);
+            return true;
+        }
+
+        /// <summary>
+        /// 查找替换用：把某个对象那一行里的第一个字符串字面量换成新文本（字号/颜色/坐标等参数原样保留）。
+        /// 只在本应用生成的行上工作（必须有 # manimble:id 标记），手写代码一律不碰——
+        /// 手写行的字符串可能是表达式的一部分，盲目替换会改坏语法。
+        /// </summary>
+        public static bool TryReplaceLiteral(string source, string codeId, string newText,
+                                             out string updated, out string note)
+        {
+            updated = source;
+            note = null;
+            if (string.IsNullOrEmpty(source) || string.IsNullOrEmpty(codeId)) { note = "没有可写回的源码"; return false; }
+            string tag = Marker + ":" + codeId;
+            var lines = source.Replace("\r\n", "\n").Split('\n').ToList();
+            int idx = lines.FindIndex(l => l.Contains(tag));
+            if (idx < 0) { note = "代码里找不到该对象的标记行"; return false; }
+
+            string line = lines[idx];
+            int q = -1;
+            for (int i = 0; i < line.Length; i++)
+            {
+                if (line[i] == '"' || line[i] == '\'') { q = i; break; }
+                // 行尾注释之前还没遇到引号，说明这一行没有字面量
+                if (line[i] == '#') break;
+            }
+            if (q < 0) { note = "这一行没有可以替换的文本"; return false; }
+
+            // 前缀（r / f / u / b）要原样保留：切掉 r 会让反斜杠被再转义一遍，
+            // 切掉 f 会让原来的 {} 从插值退化成字面量（或反过来）。
+            int quoteStart = q;
+            char prefix = '\0';
+            if (q - 1 >= 0 && "rRuUbBfF".IndexOf(line[q - 1]) >= 0 &&
+                (q - 2 < 0 || !(char.IsLetterOrDigit(line[q - 2]) || line[q - 2] == '_')))
+            {
+                prefix = line[q - 1];
+                quoteStart = q - 1;
+            }
+
+            char quote = line[q];
+            int qEnd = -1;
+            for (int i = q + 1; i < line.Length; i++)
+            {
+                if (line[i] == '\\') { i++; continue; }
+                if (line[i] == quote) { qEnd = i; break; }
+            }
+            if (qEnd < 0) { note = "字符串字面量没有闭合"; return false; }
+
+            string literal = EscapeLiteral(newText ?? "", quote, prefix);
+            lines[idx] = line.Substring(0, quoteStart) + literal + line.Substring(qEnd + 1);
+            updated = string.Join("\n", lines);
+            note = "已替换该对象代码里的文本";
+            return true;
+        }
+
+        /// <summary>
+        /// 按目标字面量类型转义一段普通文本，返回值包含前缀与引号。
+        /// raw（r"…"）：反斜杠就是字面量，不能再转义；f-string（f"…"）：花括号是插值，字面花括号要写成 {{ }}。
+        /// </summary>
+        private static string EscapeLiteral(string s, char quote, char prefix = '\0')
+        {
+            string t = (s ?? "").Replace("\r", "");
+            bool isRaw = prefix == 'r' || prefix == 'R';
+
+            if (isRaw && t.IndexOf(quote) >= 0)
+            {
+                // raw 字符串里写不出「引号本身」而不带反斜杠，只能退回普通字符串（此时反斜杠要转义）
+                isRaw = false;
+                prefix = '\0';
+            }
+
+            // 前缀要显式转成字符串：char + char 是整数加法（'r' + '"' == 148），会写出非法代码
+            string pre = prefix == '\0' ? "" : prefix.ToString();
+
+            if (isRaw)
+            {
+                t = t.Replace("\n", "\\n");   // 单行 raw 里不能有真换行；\n 在 LaTeX 里正好是换行
+                return pre + quote + t + quote;
+            }
+
+            // 必须先转义反斜杠再转义换行：反过来的话，刚写进去的 \n 会被再转义一次变成 \\n
+            t = t.Replace("\\", "\\\\");
+            if (quote == '\'') t = t.Replace("'", "\\'");
+            else t = t.Replace("\"", "\\\"");
+            if (prefix == 'f' || prefix == 'F')
+                t = t.Replace("{", "{{").Replace("}", "}}");
+            t = t.Replace("\n", "\\n");
+            return pre + quote + t + quote;
         }
 
         /// <summary>把公式写成 Python raw string：保留反斜杠，按内容选择引号，绝不出现 rr"…"。</summary>

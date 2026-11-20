@@ -50,6 +50,10 @@ pip-modern-metadata-*/
 samples/**/media/
 samples/**/deck/slides/
 
+## BioCartoon 运行时下载的图标目录（体积大，可按需 sync 重建）
+biocartoon/
+engine/biocartoon/
+
 ## 内部文档（产品需求 / 测试报告，不随代码发布）
 deliverables/
 docs/internal/

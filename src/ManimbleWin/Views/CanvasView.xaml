@@ -111,16 +111,21 @@
             </Border>
         </DataTemplate>
 
-        <!-- 图片对象 -->
+        <!-- 图片对象：有真实图片时显示缩略图，否则回退到图标+文件名 -->
         <DataTemplate x:Key="ImageObjectTemplate">
             <Border Style="{StaticResource ObjectSelectionChrome}" BorderThickness="1.5" Cursor="Hand"
                     MouseLeftButtonDown="Object_Click" MouseMove="Object_Move" MouseLeftButtonUp="Object_Up"
                     Tag="{Binding}" Background="#20FFFFFF" BorderBrush="{DynamicResource TableGridBrush}">
                 <Grid IsHitTestVisible="False">
-                    <Path Data="{StaticResource Icon.Image}" Stroke="{DynamicResource TextSecondaryBrush}"
-                          StrokeThickness="1" Stretch="Uniform" Width="48" Height="48" HorizontalAlignment="Center"/>
-                    <TextBlock Text="{Binding ImageLabel}" Foreground="{DynamicResource TextSecondaryBrush}"
-                               FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6"/>
+                    <Image Source="{Binding ImagePath, Converter={StaticResource PathToImage}}"
+                           Stretch="Uniform" IsHitTestVisible="False"
+                           Visibility="{Binding HasImage, Converter={StaticResource BoolToVis}}"/>
+                    <Grid Visibility="{Binding HasImage, Converter={StaticResource InvBoolToVis}}">
+                        <Path Data="{StaticResource Icon.Image}" Stroke="{DynamicResource TextSecondaryBrush}"
+                              StrokeThickness="1" Stretch="Uniform" Width="48" Height="48" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding ImageLabel}" Foreground="{DynamicResource TextSecondaryBrush}"
+                                   FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6"/>
+                    </Grid>
                 </Grid>
             </Border>
         </DataTemplate>
@@ -181,10 +186,20 @@
 
         <!-- 画布主体：中间是 16:9 幻灯片 -->
         <Grid Grid.Row="1" ClipToBounds="True">
+            <!-- 画布底色：上下渐变，两端颜色必须跟着明暗主题走。
+                 两个停靠点绑的是"颜色资源"（Color，值类型）而不是画刷实例的 Color 属性——画刷实例在
+                 ThemeManager 里会被整体替换，按实例 Binding 的停靠点会一直停在旧颜色。
+                 ⚠ 生效范围（实测，别再往注释里写反）：DynamicResource 对"已经接进可视树、有窗口祖先"
+                 的元素有效；对从未挂窗口的分离态控件（new CanvasView() 直接读）不生效——WPF 的资源
+                 失效通知是从窗口往下广播的。本仓只有 MainWindow.xaml 这一处实例化，运行时控件始终在
+                 窗口里，所以这里保持纯声明式即可；若将来要做预览窗口，务必把预览控件挂进某个 Window
+                 （或自行订阅 ThemeManager.ThemeChanged），否则切主题时预览的画布底色不会变。
+                 同样地，不要在代码里给 GradientStop.Color 赋值：那会把这里的 DynamicResource 表达式
+                 顶掉（ReadLocalValue 变成 Color），重新退化成需要手动同步。 -->
             <Grid.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                    <GradientStop Color="{Binding Source={StaticResource CanvasTopBrush}, Path=Color}" Offset="0"/>
-                    <GradientStop Color="{Binding Source={StaticResource CanvasBottomBrush}, Path=Color}" Offset="1"/>
+                    <GradientStop Color="{DynamicResource CanvasTopColor}" Offset="0"/>
+                    <GradientStop Color="{DynamicResource CanvasBottomColor}" Offset="1"/>
                 </LinearGradientBrush>
             </Grid.Background>
 
@@ -241,10 +256,16 @@
                         </ItemsControl.ItemContainerStyle>
                     </ItemsControl>
 
-                    <!-- 幻灯片页码 -->
+                    <!-- 幻灯片区页码 -->
                     <TextBlock Text="{Binding CurrentSlide.Number}" Foreground="#66FFFFFF" FontSize="16"
                                HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,20,12"
                                IsHitTestVisible="False"/>
+
+                    <!-- 框选矩形：在空白处按下拖动时显示，只在选中判断时用到它的范围 -->
+                    <Rectangle x:Name="RubberBand" Visibility="Collapsed" IsHitTestVisible="False"
+                               HorizontalAlignment="Left" VerticalAlignment="Top"
+                               Fill="#1AFF6C0C" Stroke="{DynamicResource SelectionBrush}" StrokeThickness="1"
+                               StrokeDashArray="4,3"/>
                 </Grid>
             </Viewbox>
 

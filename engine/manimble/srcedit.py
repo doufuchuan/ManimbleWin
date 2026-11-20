@@ -16,6 +16,7 @@ import math
 import os
 import re
 import shutil
+import time
 import tokenize
 from dataclasses import dataclass, field
 
@@ -29,6 +30,22 @@ def fmt(x: float, nd: int = 3) -> str:
 
 def py_str(s: str) -> str:
     return json.dumps(s, ensure_ascii=False)
+
+
+def _retry_locked(op, *args):
+    """Run a file operation that can lose a race with a reader on Windows.
+
+    A process that is still importing the deck (a render worker started by the previous render or by a theme
+    preview), an indexer or an editor can hold the file open for a few milliseconds; os.replace / os.remove then
+    fail with "Access is denied" (WinError 5, PermissionError). Retry briefly: on POSIX the first attempt succeeds,
+    and a file that is really locked still raises after the last one (about 0.6 s)."""
+    for attempt in range(12):
+        try:
+            return op(*args)
+        except PermissionError:
+            if attempt == 11:
+                raise
+            time.sleep(0.05)
 
 
 # A text box, on the line of its string literal: `# manimble box w=<width>` is the wrap width (manim units; the
@@ -205,14 +222,14 @@ class Project:
         path = os.path.join(self.dir, rel)
         if data is None:                           # undo of a file creation
             try:
-                os.remove(path)
+                _retry_locked(os.remove, path)
             except FileNotFoundError:
                 pass
             return
         tmp = path + ".manimble.tmp"
         with open(tmp, "wb") as fh:
             fh.write(data)
-        os.replace(tmp, path)
+        _retry_locked(os.replace, tmp, path)
 
     def src(self, rel: str) -> Src:
         data = self.read(rel)

@@ -22,6 +22,7 @@ from pathlib import Path
 
 from .srcedit import (BLANK_CELLS, BOX_PAD, EditError, Planner, Project, Src, _stmt_lines, box_tag, ensure_helpers, fmt, py_str, py_tex,
                       CHAR_STYLES, insert_kwarg, map_ranges, t2_literals, remove_kwargs, unwrap_soft, vec_expr, wrap_soft)
+from . import biocartoon_client
 
 HERE = Path(__file__).resolve().parent
 
@@ -3734,6 +3735,106 @@ class Manimble:
         """{svg, png, out}: a manim-ready copy of a BioCartoon SVG when manim draws it like its PNG (svg_icon.prepare)."""
         return self.aux_worker.request(dict(req, cmd="svg_icon"))
 
+    # ------------------------------------------------------------- biocartoon
+    def bio_search(self, req: dict) -> dict:
+        """{query, limit, filters}: search the BioCartoon catalog (CLI, with offline fallback)."""
+        return biocartoon_client.search(req.get("query", ""), req.get("limit", 12), req.get("filters"))
+
+    def bio_fetch(self, req: dict) -> dict:
+        """{icon, out, kind}: fetch an icon's SVG/PNG to `out` (CLI, with offline fallback).
+        NOTE: the RPC layer reserves `id` for the request counter, so the icon id is `icon` here."""
+        return biocartoon_client.fetch(req["icon"], req["out"], req.get("kind", "svg"))
+
+    def python_plot(self, req: dict) -> dict:
+        """Run user matplotlib code in a controlled subprocess and write a PNG to req['out'].
+
+        Returns {ok, file, error, stdout, stderr}. The user code is wrapped with a preamble that
+        forces the Agg backend and defines `__out__` (the absolute output path); after the code
+        runs, if that file was not produced, a `plt.savefig(__out__)` is injected as a fallback.
+        So users may either savefig(__out__) themselves or just draw and let the engine save it.
+        A fresh subprocess (not the long-lived worker) gives real 60s timeout, isolated env and
+        a deck working directory.
+        """
+        code = req.get("code") or ""
+        out = req.get("out")
+        if not out:
+            return {"ok": False, "error": "缺少输出路径 out"}
+        out_path = Path(out)
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            if out_path.exists():
+                out_path.unlink()
+        except OSError as exc:
+            return {"ok": False, "error": f"无法准备输出目录：{exc}"}
+
+        # The output path is injected as a real variable; a fallback savefig covers code that
+        # never calls savefig. `repr` of the posix path keeps quoting safe on Windows.
+        script = (
+            "import matplotlib\n"
+            "matplotlib.use('Agg')\n"
+            "import matplotlib.pyplot as plt\n"
+            f"__out__ = {out_path.as_posix()!r}\n"
+            "# ---- user code ----\n"
+            + code + "\n"
+            "# ---- end user code ----\n"
+            "import os\n"
+            "if not os.path.exists(__out__):\n"
+            "    plt.savefig(__out__, bbox_inches='tight')\n"
+        )
+        tmp = self.cache_dir / "plot-tmp"
+        mplconfig = self.cache_dir / "mplconfig"
+        try:
+            tmp.mkdir(parents=True, exist_ok=True)
+            mplconfig.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        script_file = tmp / f"plot_{os.getpid()}_{int(time.time() * 1000)}.py"
+        try:
+            script_file.write_text(script, encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "error": f"无法写入临时脚本：{exc}"}
+
+        env = os.environ.copy()
+        # Clear the host's PYTHON* so the subprocess uses only the venv's own site-packages.
+        # Do NOT point PYTHONPATH at engine/manimble: that dir has a packaging.py which shadows
+        # the real `packaging` package and breaks matplotlib's import.
+        for k in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONEXECUTABLE",
+                  "PYTHONUSERBASE", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "MANIMBLE_PYTHON"):
+            env.pop(k, None)
+        env["MPLBACKEND"] = "Agg"
+        env["MPLCONFIGDIR"] = str(mplconfig)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+        env["TMP"] = env["TEMP"] = env["TMPDIR"] = str(tmp)
+
+        try:
+            # stdin=DEVNULL is essential: the RPC server reads requests from stdin in its main
+            # loop; a child inheriting that pipe would block the whole server until timeout.
+            cp = subprocess.run(
+                [self.python, str(script_file)], cwd=str(self.deck), env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+                text=True, encoding="utf-8", errors="replace",
+            )
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "绘图代码超过 60 秒超时，已终止。",
+                    "stdout": "", "stderr": "timeout"}
+        finally:
+            try:
+                script_file.unlink()
+            except OSError:
+                pass
+
+        out_log = (cp.stdout or "")[-1000:]
+        err_log = (cp.stderr or "")[-1500:]
+        if cp.returncode != 0:
+            return {"ok": False, "error": (err_log or out_log or "执行失败").strip(),
+                    "stdout": out_log, "stderr": err_log}
+        if not out_path.is_file() or out_path.stat().st_size == 0:
+            return {"ok": False, "error": "代码执行成功但没有生成图片；请绘制图形或调用 plt.savefig(__out__)。",
+                    "stdout": out_log, "stderr": err_log}
+        return {"ok": True, "file": str(out_path), "stdout": out_log, "stderr": err_log}
+
     def copy_objects(self, req: dict) -> dict:
         """What Copy puts on the clipboard for objects of a slide (`oids`, at build `stop`), one entry per piece of code:
         the code that makes it again elsewhere in the deck (srcedit.portable_code; None, with `why`, when it cannot
@@ -3783,6 +3884,140 @@ class Manimble:
                           "box": [x0, y0, x1, y1], "pictures": pics, "text": "\n".join(texts) or None})
         return {"ok": True, "items": items, "file": self.scene(name)["file"]}
 
+    # ------------------------------------------------------- extract images
+    def extract_images(self, req: dict) -> dict:
+        """List every image file the deck references (op=list), or copy them into a folder (op=save).
+
+        Read-only: scanning never edits deck source and never records undo history; save only copies files.
+        """
+        op = req.get("op", "list")
+        deck = Path(self.deck).resolve()
+        exts = {".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"}
+        found: dict[str, dict] = {}          # lowercased absolute path -> {"path", "scenes"}
+
+        def add(raw, scene: str = ""):
+            if not raw:
+                return
+            p = Path(str(raw).strip())
+            if not p.is_absolute():
+                p = deck / p
+            try:
+                p = p.resolve()
+            except OSError:
+                return
+            if p.suffix.lower() not in exts or not p.is_file():
+                return
+            e = found.setdefault(str(p).lower(), {"path": p, "scenes": []})
+            if scene and scene not in e["scenes"]:
+                e["scenes"].append(scene)
+
+        self.refresh_scenes()
+        targets = [self.scene(req["scene"])] if req.get("scene") else list(self.scenes)
+
+        # Rendered image objects and background pictures, attributed to their scene.
+        for sc in targets:
+            name = sc["name"]
+            try:
+                if self.status(name) == "ready":
+                    info = self.api_scene(name, wait=False)
+                    for o in (info.get("objects") or {}).values():
+                        if isinstance(o, dict) and o.get("kind") == "image":
+                            add(o.get("imagePath") or o.get("image") or o.get("value"), name)
+                else:
+                    # stale/pending scenes: read cached object data without forcing a render
+                    for o in ((self.results.get(name) or {}).get("data", {}).get("objects") or {}).values():
+                        if o.get("kind") == "image":
+                            add(o.get("path") or o.get("value"), name)
+            except Exception:                    # noqa: BLE001 - one bad scene must not abort the scan
+                pass
+            try:
+                src, fn = self._construct(sc)
+                bg = self._bg_parse([t for _, _, t in self._bg_statements(src, fn)])
+                add(bg.get("image"), name)
+            except Exception:                    # noqa: BLE001
+                pass
+
+        # Source-level scan: catches ImageMobject(...) literals, including in unrendered or unused scenes.
+        def path_segments(n) -> list[str]:
+            if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div):
+                return path_segments(n.left) + path_segments(n.right)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                return [n.value]
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "str" and len(n.args) == 1:
+                return path_segments(n.args[0])
+            return []
+
+        wanted = req.get("scene")
+        py_files = ([Path(self.deck) / sc["file"] for sc in targets] if wanted
+                    else sorted(Path(self.deck).rglob("*.py")))
+        for py in py_files:
+            try:
+                rel = py.resolve().relative_to(deck).as_posix()
+            except (OSError, ValueError):
+                rel = None
+            in_file = [s for s in self.all_scenes if s["file"] == rel]
+            try:
+                tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
+            except (SyntaxError, OSError):
+                continue
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id == "ImageMobject"):
+                    continue
+                owner = next((s["name"] for s in in_file if s["line"] <= node.lineno <= s["end"]), "")
+                if wanted and owner != wanted:
+                    continue
+                arg = node.args[0] if node.args else None
+                if arg is None:
+                    for kw in node.keywords:
+                        if kw.arg in ("filename_or_array", "file_name"):
+                            arg = kw.value
+                            break
+                if arg is None:
+                    continue
+                parts = [p.strip("/\\") for p in path_segments(arg) if p not in ("pathlib", "os", "__file__")]
+                if parts:
+                    add("/".join(parts), owner)
+
+        images = []
+        for e in found.values():
+            p = e["path"]
+            try:
+                rel = p.relative_to(deck).as_posix()
+            except ValueError:
+                rel = p.as_posix()
+            images.append({"file": rel, "name": p.name, "scene": ",".join(e["scenes"]),
+                           "size": p.stat().st_size})
+        images.sort(key=lambda x: x["file"].lower())
+
+        if op == "list":
+            return {"ok": True, "images": images}
+        if op != "save":
+            return {"ok": False, "error": f"unknown op {op!r}"}
+        target = req.get("dir")
+        if not target:
+            return {"ok": False, "error": "dir is required for save"}
+        out = Path(target)
+        try:
+            out.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        saved = []
+        for e in found.values():
+            p = e["path"]
+            dst = out / p.name
+            if dst.exists():
+                i = 1
+                while (out / f"{p.stem}_{i}{p.suffix}").exists():
+                    i += 1
+                dst = out / f"{p.stem}_{i}{p.suffix}"
+            try:
+                shutil.copy2(p, dst)
+                saved.append(str(dst.resolve()))
+            except OSError as exc:
+                return {"ok": False, "error": f"cannot copy {p.name}: {exc}", "saved": saved}
+        return {"ok": True, "saved": saved, "dir": str(out.resolve())}
+
     def sprite(self, req: dict) -> dict:
         """Rasterise a single text/formula for instant on-canvas preview."""
         req = dict(req, cmd="sprite", out=str(self.cache_dir / "sprites"))
@@ -3827,6 +4062,34 @@ class Manimble:
             emit({"event": "export", "phase": "error", "error": str(exc)})
         finally:
             self._exporting = False
+
+    # ------------------------------------------------------- portable project package
+    def package(self, req: dict) -> dict:
+        """Copy the deck's sources and assets into a portable folder or zip, in the background."""
+        if getattr(self, "_packaging", False):
+            return {"ok": False, "error": "a package job is already running"}
+        self._packaging = True
+        threading.Thread(target=self._package_job, args=(req,), daemon=True).start()
+        return {"ok": True}
+
+    def _package_job(self, req: dict):
+        self.job_start()
+        self._settle()
+        from . import packaging
+        emit = self.on_event or (lambda e: None)
+        try:
+            emit({"event": "package", "phase": "scanning"})
+            self.check_cancel()
+            manifest = packaging.build_portable(self, req["path"], bool(req.get("include_media", False)))
+            self.check_cancel()
+            emit({"event": "package", "phase": "done" if manifest.get("ok") else "error",
+                  "manifest": manifest, "path": req["path"], "error": manifest.get("error")})
+        except Cancelled:
+            emit({"event": "package", "phase": "cancelled"})
+        except Exception as exc:                          # noqa: BLE001
+            emit({"event": "package", "phase": "error", "error": str(exc)})
+        finally:
+            self._packaging = False
 
     # --------------------------------------------------- Manim Slides presenter
     def present(self, req: dict | None = None) -> dict:

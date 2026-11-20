@@ -220,6 +220,27 @@ namespace ManimbleWin.Services
         public Task<JsonElement> Present(string scene = null, int height = 720)
             => Request("present", scene == null ? new { height } : new { scene, height }, 180000);
 
+        /// <summary>
+        /// 演讲者备注。op=get 读文本；op=set 写回 next_slide(notes=...) 并重渲染。
+        /// stop 非空时读写「某个 build 的备注」（引擎会转给 build_notes）。
+        /// </summary>
+        public Task<JsonElement> Notes(string scene, string op, string text = null, int? stop = null)
+        {
+            var args = new System.Collections.Generic.Dictionary<string, object>
+            {
+                ["scene"] = scene, ["op"] = op, ["text"] = text ?? "", ["stop"] = stop
+            };
+            return Request("notes", args, 180000);
+        }
+
+        /// <summary>幻灯片替代文本：op=get 读，op=set 写（不触发重渲染）。</summary>
+        public Task<JsonElement> AltText(string scene, string op, string text = null)
+            => Request("alt_text", new { scene, op, text = text ?? "" }, 120000);
+
+        /// <summary>演讲者视图静帧：返回每页的 PNG 路径、备注与逐 build 备注，只等当前及后 ahead-1 页。</summary>
+        public Task<JsonElement> DeckPages(string current, int ahead)
+            => Request("deck_pages", new { current, ahead }, 180000);
+
         /// <summary>导出影片（MP4）。进度通过 export_movie 事件回传。</summary>
         public Task<JsonElement> ExportMovie(string path, string[] scenes = null, int height = 720, double hold = 2, int fps = 30)
         {
@@ -230,6 +251,25 @@ namespace ManimbleWin.Services
             if (scenes != null) args["scenes"] = scenes;
             return Request("export_movie", args, 600000);
         }
+
+        /// <summary>打包当前 deck 为可移植包。返回的是受理 ack，真正的 manifest 由 package 事件回传。</summary>
+        public Task<JsonElement> Package(string path, bool includeMedia, int timeoutMs = 900000)
+            => Request("package", new System.Collections.Generic.Dictionary<string, object>
+            {
+                ["path"] = path, ["include_media"] = includeMedia
+            }, timeoutMs);
+
+        /// <summary>搜索 BioCartoon 图标目录（首次会下载 catalog，超时给足）。</summary>
+        public Task<JsonElement> BioSearch(string query, int limit, object filters)
+            => Request("bio_search", new { query, limit = limit, filters = filters ?? new { } }, 150000);
+
+        /// <summary>下载某个 BioCartoon 图标的 SVG 或 PNG 到指定绝对路径。</summary>
+        public Task<JsonElement> BioFetch(string id, string outPath, string kind = "svg")
+            => Request("bio_fetch", new { icon = id, @out = outPath, kind }, 150000);
+
+        /// <summary>在受控子进程里执行用户 Python 绘图代码，输出 PNG 到 outPath。</summary>
+        public Task<JsonElement> PythonPlot(string code, string outPath, string cwd = null)
+            => Request("python_plot", new { code, @out = outPath, cwd = cwd ?? "" }, 90000);
 
         public void Dispose()
         {

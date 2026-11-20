@@ -50,6 +50,15 @@ namespace ManimbleWin.Helpers
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
     }
 
+    /// <summary>字符串等于参数时返回 true。用于让一组 RadioButton 绑定同一个字符串属性（BgMode、PagePos）。</summary>
+    public class StringEqualConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            => string.Equals(value?.ToString(), parameter?.ToString(), StringComparison.OrdinalIgnoreCase);
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            => value is bool b && b ? parameter?.ToString() : Binding.DoNothing;
+    }
+
     public class BoolToOpacityConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)

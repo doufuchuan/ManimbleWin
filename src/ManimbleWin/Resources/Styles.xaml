@@ -7,6 +7,7 @@
     <conv:NullToVisibilityConverter x:Key="NullToVis"/>
     <conv:NullToVisibilityConverter x:Key="InvNullToVis" ParameterFallback="Invert"/>
     <conv:StringToBrushConverter x:Key="StrBrush"/>
+    <conv:StringEqualConverter x:Key="StrEq"/>
     <conv:BoolToOpacityConverter x:Key="BoolToOpacity"/>
     <conv:ZoomConverter x:Key="ZoomText"/>
     <conv:EnumEqualsConverter x:Key="EnumEq"/>
@@ -23,6 +24,7 @@
     <conv:PathToImageConverter x:Key="PathToImage"/>
     <conv:EnumToVisibilityConverter x:Key="KindIsTex" Target="Tex"/>
     <conv:EnumToVisibilityConverter x:Key="KindIsNotTex" Target="Tex" Invert="True"/>
+    <conv:EnumToVisibilityConverter x:Key="KindIsImage" Target="Image"/>
 
     <!-- 工具栏图标按钮 -->
     <Style x:Key="ToolIconButton" TargetType="Button">

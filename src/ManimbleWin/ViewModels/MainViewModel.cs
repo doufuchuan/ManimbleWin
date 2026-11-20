@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -33,6 +34,8 @@ namespace ManimbleWin.ViewModels
             {
                 if (SetProperty(ref _currentSlide, value) && value != null)
                 {
+                    // 切页前先把上一页未提交的备注写回，避免停手时间不够就切走导致丢失
+                    FlushPendingNotesNow();
                     if (value.CurrentBuildIndex < 0 || value.CurrentBuildIndex >= value.Builds.Count)
                         value.CurrentBuildIndex = 0;
                     SelectedObject = null;
@@ -96,26 +99,132 @@ namespace ManimbleWin.ViewModels
         public ObservableCollection<CanvasObject> CurrentObjects => CurrentBuild?.Objects;
 
         private CanvasObject _selectedObject;
+        /// <summary>主选中对象：检视器、方向键微调、源码行高亮都以它为准。</summary>
         public CanvasObject SelectedObject
         {
             get => _selectedObject;
             set
             {
-                var old = _selectedObject;
-                if (!SetProperty(ref _selectedObject, value)) return;
-                if (ReferenceEquals(old, value)) return;
-                if (old != null) old.PropertyChanged -= SelectedObject_PropertyChanged;
-                if (value != null) value.PropertyChanged += SelectedObject_PropertyChanged;
-                foreach (var s in Slides)
-                    foreach (var b in s.Builds)
-                        foreach (var o in b.Objects)
-                            o.IsSelected = ReferenceEquals(o, value);
-                RaisePropertyChanged(nameof(HasSelection));
-                RebuildSourceLines();
+                if (value == null) ClearSelection();
+                else SelectSingleObject(value);
             }
         }
 
-        public bool HasSelection => SelectedObject != null;
+        /// <summary>多选集合（含主选中对象）。组合、对齐、分布、批量删除都读它。</summary>
+        public ObservableCollection<CanvasObject> SelectedObjects { get; } = new ObservableCollection<CanvasObject>();
+
+        public bool HasSelection => SelectedObjects.Count > 0;
+
+        public string SelectionSummary
+        {
+            get
+            {
+                int n = SelectedObjects.Count;
+                if (n == 0) return "";
+                if (n == 1) return "1 个对象";
+                return $"{n} 个对象";
+            }
+        }
+
+        /// <summary>
+        /// 统一设置选区。
+        /// 为什么不用 SelectedObject 的属性赋值来做：一次操作要同时改「每个对象的 IsSelected」、
+        /// 「选区集合」和「主选中对象」，分散在属性 setter 里很容易只改到一半，导致画布与命令看到的状态不一致。
+        /// </summary>
+        public void SetSelection(IEnumerable<CanvasObject> objects, CanvasObject primary = null)
+        {
+            var list = objects == null
+                ? new List<CanvasObject>()
+                : objects.Where(o => o != null).Distinct().ToList();
+
+            if (primary == null || !list.Contains(primary)) primary = list.FirstOrDefault();
+
+            // 组合在原型模式下就是「选中即同组」：把同组兄弟一起拉进选区
+            var expanded = new List<CanvasObject>(list);
+            foreach (var o in list.ToList())
+            {
+                if (!o.IsGrouped) continue;
+                foreach (var s in Slides)
+                    foreach (var b in s.Builds)
+                        foreach (var ob in b.Objects)
+                            if (ob.IsGrouped && ob.GroupId == o.GroupId && !expanded.Contains(ob)) expanded.Add(ob);
+            }
+            list = expanded;
+
+            foreach (var s in Slides)
+                foreach (var b in s.Builds)
+                    foreach (var o in b.Objects)
+                        o.IsSelected = list.Contains(o);
+
+            SelectedObjects.Clear();
+            foreach (var o in list) SelectedObjects.Add(o);
+
+            var old = _selectedObject;
+            if (!ReferenceEquals(old, primary))
+            {
+                if (old != null) old.PropertyChanged -= SelectedObject_PropertyChanged;
+                _selectedObject = primary;
+                if (primary != null) primary.PropertyChanged += SelectedObject_PropertyChanged;
+                RaisePropertyChanged(nameof(SelectedObject));
+            }
+
+            RaiseSelectionChanged();
+        }
+
+        public void SelectSingleObject(CanvasObject o)
+        {
+            if (o == null) { ClearSelection(); return; }
+            SetSelection(new[] { o }, o);
+        }
+
+        /// <summary>Shift 点选：已在选区里则移出，否则加入。</summary>
+        public void ToggleSelection(CanvasObject o)
+        {
+            if (o == null) return;
+            var list = SelectedObjects.ToList();
+            if (list.Contains(o))
+            {
+                list.Remove(o);
+                SetSelection(list, list.LastOrDefault());
+            }
+            else
+            {
+                list.Add(o);
+                SetSelection(list, o);
+            }
+        }
+
+        public void ClearSelection() => SetSelection(null, null);
+
+        public void SelectAll()
+        {
+            var objs = CurrentObjects?.ToList() ?? new List<CanvasObject>();
+            if (objs.Count == 0) { ShowToast("这一页没有可选的对象"); return; }
+            SetSelection(objs, objs.Last());
+            ShowToast($"已全选 {objs.Count} 个对象");
+        }
+
+        private void RaiseSelectionChanged()
+        {
+            RaisePropertyChanged(nameof(HasSelection));
+            RaisePropertyChanged(nameof(SelectionSummary));
+            RaisePropertyChanged(nameof(StatusBarText));
+            RebuildSourceLines();
+        }
+
+        /// <summary>框选：矩形与对象包围盒相交即选中（只要沾到就算，符合大多数演示软件的手感）。</summary>
+        public void SelectInRect(Rect rect, bool additive)
+        {
+            var hits = new List<CanvasObject>();
+            foreach (var o in CurrentObjects ?? Enumerable.Empty<CanvasObject>())
+            {
+                var box = new Rect(o.X, o.Y, Math.Max(1, o.Width), Math.Max(1, o.Height));
+                if (rect.IntersectsWith(box)) hits.Add(o);
+            }
+            if (additive) hits = SelectedObjects.Concat(hits).Distinct().ToList();
+            SetSelection(hits, hits.LastOrDefault());
+        }
+
 
         private DeckTheme _currentTheme;
         public DeckTheme CurrentTheme
@@ -123,8 +232,11 @@ namespace ManimbleWin.ViewModels
             get => _currentTheme;
             set
             {
-                if (SetProperty(ref _currentTheme, value) && value != null)
+                if (SetProperty(ref _currentTheme, value) && value != null && !EngineConnected)
                 {
+                    // 原型模式（没有引擎）时，换主题就地给所有文字换色，所见即所得。
+                    // 连了引擎就不要再这么做：deck 的真实配色由引擎改写源码 + 重渲染决定，
+                    // 这里抢先改本地颜色只会让画布和源码短暂不一致。
                     foreach (var s in Slides)
                         foreach (var b in s.Builds)
                             foreach (var o in b.Objects)
@@ -234,7 +346,8 @@ namespace ManimbleWin.ViewModels
 
         public string StatusBarText => CurrentSlide == null
             ? "未加载演示文稿"
-            : $"演示文稿: hello   ·   第 {CurrentSlide.Number}/{Slides.Count} 页   ·   构建 {CurrentSlide.CurrentBuildIndex + 1}/{CurrentSlide.Builds.Count}   ·   {CurrentObjects?.Count ?? 0} 个对象";
+            : $"演示文稿: hello   ·   第 {CurrentSlide.Number}/{Slides.Count} 页   ·   构建 {CurrentSlide.CurrentBuildIndex + 1}/{CurrentSlide.Builds.Count}   ·   {CurrentObjects?.Count ?? 0} 个对象"
+              + (SelectedObjects.Count > 1 ? $"（已选 {SelectedObjects.Count}）" : "");
 
         // 画布标尺刻度（设计坐标 1280 宽，每 100 一大格）
         public ObservableCollection<RulerMark> RulerMarks { get; } = BuildRulerMarks();
@@ -273,6 +386,7 @@ namespace ManimbleWin.ViewModels
 
         private readonly EngineIntegration _engine;
         public EngineIntegration Engine => _engine;
+        private bool _packaging;   // 打包进行中，避免菜单/工具栏重复点击
 
         // 拖动/微调后的坐标写回引擎做节流：连续拖动只在停下来后提交一次
         private readonly System.Windows.Threading.DispatcherTimer _engineSync;
@@ -340,6 +454,660 @@ namespace ManimbleWin.ViewModels
         /// <summary>检视器里「编辑…」：打开带实时预览的公式编辑器修改选中公式。</summary>
         public ICommand EditFormulaCommand { get; }
 
+        /// <summary>检视器里「更换图片…」：为选中的图片对象换一张图片（走引擎，一步撤销）。</summary>
+        public ICommand ReplaceImageCommand { get; }
+
+        /// <summary>「提取图片…」：列出 deck 中所有图片并复制到用户选择的文件夹。</summary>
+        public ICommand ExtractImagesCommand { get; }
+
+        #endregion
+
+        #region 编辑核心：撤销 / 剪贴板 / 组合对齐 / 查找替换
+
+        // 原型模式下的撤销栈；连接引擎后撤销交给引擎（它按文件差分，更精确）
+        private readonly DeckHistory _history = new DeckHistory();
+        private readonly ObjectClipboard _clipboard = ObjectClipboard.Shared;
+
+        /// <summary>查找替换浮层的视图模型。</summary>
+        public FindViewModel Find { get; }
+
+        private bool EngineConnected => _engine != null && _engine.IsConnected;
+
+        private List<CanvasObject> SelectionList => SelectedObjects.ToList();
+
+        private DeckSnapshot Capture() => DeckHistory.Capture(Slides, Slides.IndexOf(CurrentSlide));
+
+        /// <summary>
+        /// 拖动开始时拍一份快照，松手时提交。
+        /// 为什么拖动要单独开事务：拖动过程中每帧都在改坐标，若每帧都记一步历史，
+        /// 一次拖动就会刷出几十步撤销；这里只在松手时记一步。
+        /// </summary>
+        public DeckSnapshot BeginMoveTransaction()
+            => EngineConnected ? null : Capture();
+
+        /// <summary>拖动结束：把这一整段位移记成一步撤销。</summary>
+        public void EndMoveTransaction(DeckSnapshot snap, string label = "移动对象")
+        {
+            if (snap != null) _history.Push(label, snap);
+        }
+
+        /// <summary>供查找替换等外部调用方开一步可撤销的本地改动（引擎模式下返回 null，由引擎记录）。</summary>
+        public DeckSnapshot BeginLocalUndoStep() => EngineConnected ? null : Capture();
+
+        public void CommitLocalUndoStep(DeckSnapshot snap, string label)
+        {
+            if (snap != null) _history.Push(label, snap);
+        }
+
+        /// <summary>打开查找浮层（Ctrl+F / Ctrl+Alt+F）。</summary>
+        public void OpenFind(bool withReplace)
+        {
+            Find.Open(withReplace);
+            ShowToast(withReplace ? "查找和替换（Esc 关闭）" : "查找（Enter 下一个，Shift+Enter 上一个）");
+        }
+
+        /// <summary>源码被本地改动后同步界面；连接引擎时交给既有的节流写回。</summary>
+        public void NoteSourceChanged(string before) => NoteSourceChangedFor(CurrentSlide, before);
+
+        /// <summary>指定某一页的源码被改动（查找替换可能跨页，改的不一定是当前页）。</summary>
+        public void NoteSourceChangedFor(Slide slide, string before)
+        {
+            if (slide == null) return;
+            if (ReferenceEquals(slide, CurrentSlide))
+            {
+                SyncSourceText();
+                RebuildSourceLines();
+            }
+            SourceEditStatus = "代码已更新";
+            ScheduleEngineSync(slide, before);
+        }
+
+        /// <summary>备注被改动后刷新备注面板的显示（全部替换可能改到备注）。</summary>
+        public void RaiseNotesChanged()
+        {
+            RaisePropertyChanged(nameof(SlideNotesText));
+            RaisePropertyChanged(nameof(BuildNotesText));
+            RaisePropertyChanged(nameof(AltTextText));
+        }
+
+        /// <summary>把某一页切到指定 build（查找跳转用）。</summary>
+        public void SetBuildIndex(Slide slide, int index)
+        {
+            if (slide == null || slide.Builds.Count == 0) return;
+            slide.CurrentBuildIndex = Math.Max(0, Math.Min(index, slide.Builds.Count - 1));
+            if (ReferenceEquals(slide, CurrentSlide))
+            {
+                RaisePropertyChanged(nameof(CurrentBuild));
+                RaisePropertyChanged(nameof(CurrentObjects));
+                RaisePropertyChanged(nameof(UseRealRender));
+                RebuildSourceLines();
+            }
+        }
+
+        /// <summary>Esc 关闭浮层后把焦点还给画布，方向键才能继续微调。</summary>
+        public void FocusCanvas() => Keyboard.Focus(Application.Current?.MainWindow);
+
+        #region 撤销 / 重做
+
+        public async Task UndoAsync()
+        {
+            if (EngineConnected)
+            {
+                try
+                {
+                    var r = await _engine.Undo();
+                    if (IsEngineFalse(r, "ok"))
+                    {
+                        ShowToast(GetStr(r, "error") == "nothing to undo" ? "没有可撤销的操作" : "撤销被拒绝：" + GetStr(r, "error"));
+                        return;
+                    }
+                    string label = GetStr(r, "label");
+                    await RefreshAfterEngineEdit(null);
+                    ShowToast(string.IsNullOrEmpty(label) ? "已撤销" : "已撤销：" + label);
+                }
+                catch (Exception ex) { ShowToast("撤销失败：" + ex.Message); }
+                return;
+            }
+
+            if (!_history.CanUndo) { ShowToast("没有可撤销的操作"); return; }
+            var snap = _history.Undo(Capture());
+            RestoreSnapshot(snap);
+            ShowToast("已撤销");
+        }
+
+        public async Task RedoAsync()
+        {
+            if (EngineConnected)
+            {
+                try
+                {
+                    var r = await _engine.Redo();
+                    if (IsEngineFalse(r, "ok"))
+                    {
+                        ShowToast(GetStr(r, "error") == "nothing to redo" ? "没有可重做的操作" : "重做被拒绝：" + GetStr(r, "error"));
+                        return;
+                    }
+                    string label = GetStr(r, "label");
+                    await RefreshAfterEngineEdit(null);
+                    ShowToast(string.IsNullOrEmpty(label) ? "已重做" : "已重做：" + label);
+                }
+                catch (Exception ex) { ShowToast("重做失败：" + ex.Message); }
+                return;
+            }
+
+            if (!_history.CanRedo) { ShowToast("没有可重做的操作"); return; }
+            var snap = _history.Redo(Capture());
+            RestoreSnapshot(snap);
+            ShowToast("已重做");
+        }
+
+        /// <summary>恢复快照。快照里的对象是新克隆的，所以必须清空选区并重建当前页的派生状态。</summary>
+        private void RestoreSnapshot(DeckSnapshot snap)
+        {
+            if (snap == null) return;
+            DeckHistory.Restore(snap, Slides);
+            SelectedObjects.Clear();
+            _selectedObject = null;
+            RaisePropertyChanged(nameof(SelectedObject));
+            if (Slides.Count == 0) { RaiseSelectionChanged(); return; }
+
+            var target = Slides[Math.Max(0, Math.Min(snap.CurrentIndex, Slides.Count - 1))];
+            CurrentSlide = null;
+            CurrentSlide = target;
+            RaiseSelectionChanged();
+        }
+
+        #endregion
+
+        #region 复制 / 剪切 / 粘贴 / 删除
+
+        public async Task CopySelectionAsync(bool alsoDelete = false)
+        {
+            var targets = SelectionList;
+            if (targets.Count == 0) { ShowToast("请先选中对象"); return; }
+
+            _clipboard.Clear();
+            string source = CurrentSlide?.Source ?? "";
+            foreach (var o in targets)
+            {
+                var c = o.Clone();
+                c.IsSelected = false;
+                _clipboard.Objects.Add(new CopiedObject
+                {
+                    Clone = c,
+                    LineText = SourceCodeGenerator.LineTextFor(source, o.CodeId)
+                });
+            }
+            _clipboard.DeckPath = _engine?.DeckPath ?? "";
+            _clipboard.Scene = CurrentSlide?.Name ?? "";
+
+            // 引擎能给出「可移植的代码」，同 deck 跨页粘贴时比本地近似代码更忠实
+            if (EngineConnected && CurrentSlide != null)
+            {
+                try
+                {
+                    var oids = targets.Select(o => o.Oid).Where(s => !string.IsNullOrEmpty(s)).ToList();
+                    var r = await _engine.CopyObjects(CurrentSlide.Name, CurrentSlide.CurrentBuildIndex, oids);
+                    if (r.ValueKind == JsonValueKind.Object && r.TryGetProperty("items", out var items)
+                        && items.ValueKind == JsonValueKind.Array)
+                        _clipboard.SetEngineItems(items.EnumerateArray(), _engine.DeckPath, CurrentSlide.Name);
+                }
+                catch (Exception ex)
+                {
+                    // 引擎不给清单不影响使用：本页/跨页仍可用本地副本粘贴
+                    SourceEditStatus = "引擎复制不可用，已改存本地副本：" + ex.Message;
+                }
+            }
+
+            ShowToast(_clipboard.Summary + "（Ctrl+V 粘贴）");
+            if (alsoDelete) await DeleteSelectionAsync();
+        }
+
+        public Task CutSelectionAsync() => CopySelectionAsync(alsoDelete: true);
+
+        public async Task PasteAsync()
+        {
+            if (CurrentSlide == null || CurrentBuild == null) { ShowToast("没有可粘贴的页面"); return; }
+            if (!_clipboard.HasContent) { ShowToast("剪贴板为空"); return; }
+
+            bool sameDeck = string.Equals(_clipboard.DeckPath ?? "", _engine?.DeckPath ?? "", StringComparison.OrdinalIgnoreCase);
+            if (EngineConnected && sameDeck && _clipboard.EngineItems.Count > 0)
+            {
+                bool ok = await PasteViaEngineAsync();
+                if (ok) return;
+                // 引擎拒绝（源码冲突 / 对象已不在）时退回本地粘贴，至少让用户看到副本
+            }
+            PasteLocal();
+            await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 引擎粘贴：把 copy 给出的代码原样插回目标页，一次 insert_many 就是一步撤销。
+        /// 与源页同一页时把副本错开一点，避免正好盖住原件。
+        /// </summary>
+        private async Task<bool> PasteViaEngineAsync()
+        {
+            try
+            {
+                int k = _clipboard.PasteCount;
+                bool samePage = string.Equals(_clipboard.Scene, CurrentSlide.Name, StringComparison.Ordinal);
+                // 第一次粘贴也要错开（PasteCount 初值 0，用 k+1 才得到 51.2px），否则副本正压在原件上看不出变化
+                double d = samePage ? (k + 1) * 0.04 * 1280 : 0;
+                double ux = 1280 / 14.22, uy = 720 / 8.0;
+
+                var items = new List<object>();
+                foreach (var it in _clipboard.EngineItems)
+                {
+                    string code = GetStr(it, "code");
+                    if (string.IsNullOrEmpty(code)) continue;       // 由循环或合造出来的对象无法以代码粘贴
+                    double x = GetDouble(it, "at", 0, 0) + d / ux;
+                    double y = GetDouble(it, "at", 1, 0) - d / uy;
+                    var box = GetDoubleArray(it, "box");
+                    if (box.Length == 4)
+                        for (int i = 0; i < 4; i++) box[i] += d;
+                    items.Add(new Dictionary<string, object>
+                    {
+                        ["kind"] = "code",
+                        ["code"] = code + $".move_to(({x.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}, {y.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}, 0))",
+                        ["box"] = box
+                    });
+                }
+                if (items.Count == 0) return false;
+
+                var r = await _engine.InsertMany(CurrentSlide.Name, CurrentSlide.CurrentBuildIndex, items);
+                if (IsEngineFalse(r, "ok"))
+                {
+                    ShowToast("引擎未能粘贴：" + (GetStr(r, "error") ?? "未知原因"));
+                    return false;
+                }
+                _clipboard.PasteCount = (k + 1) % 6;
+                await _engine.Refresh(CurrentSlide);
+                ShowToast($"已粘贴 {items.Count} 个对象");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ShowToast("粘贴失败：" + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 本地粘贴：克隆对象 + 在目标页源码里补一行，两者必须同时做，否则下次渲染副本会消失。
+        /// 优先复用原对象那一行源码（保留完整调用），只把行尾标记换成新 id，再按偏移改写 move_to。
+        /// </summary>
+        private void PasteLocal()
+        {
+            if (CurrentBuild == null || CurrentSlide == null) return;
+            var snap = Capture();
+            int k = _clipboard.PasteCount;
+            _clipboard.PasteCount = (k + 1) % 6;
+            // 与引擎路径同一套偏移：51.2 / 102.4 / 153.6 …（第一次粘贴就错开，不盖住原件）
+            double d = (k + 1) * 0.04 * 1280;
+            string before = CurrentSlide.Source ?? "";
+
+            var added = new List<CanvasObject>();
+            foreach (var item in _clipboard.Objects)
+            {
+                var c = item.Clone.Clone();
+                c.Oid = Guid.NewGuid().ToString("N").Substring(0, 8);
+                c.CodeId = SourceCodeGenerator.NewCodeId();
+                c.X += d;
+                c.Y += d;
+                c.Z = CurrentBuild.Objects.Count;
+                c.IsSelected = false;
+                c.GroupId = "";
+                CurrentBuild.Objects.Add(c);
+                added.Add(c);
+
+                string line = RetagLine(item.LineText, c.CodeId) ?? SourceCodeGenerator.LineFor(c, 1280, 720);
+                CurrentSlide.Source = SourceCodeGenerator.AppendLine(CurrentSlide.Source, line);
+                // 复用原行时坐标还是原件的：按新位置改写它的 move_to
+                if (SourceCodeGenerator.TryUpdatePosition(CurrentSlide.Source, c, 1280, 720, out string fixedSource, out _))
+                    CurrentSlide.Source = fixedSource;
+            }
+
+            NoteSourceChanged(before);
+            SetSelection(added, added.LastOrDefault());
+            _history.Push(added.Count > 1 ? $"粘贴 {added.Count} 个对象" : "粘贴对象", snap);
+            ShowToast($"已粘贴 {added.Count} 个对象");
+        }
+
+        /// <summary>把源码行尾的 # manimble:old 标记换成新 id（行内其余部分一字不动）。</summary>
+        private static string RetagLine(string lineText, string newCodeId)
+        {
+            if (string.IsNullOrEmpty(lineText) || string.IsNullOrEmpty(newCodeId)) return null;
+            int at = lineText.LastIndexOf("# manimble", StringComparison.Ordinal);
+            if (at < 0) return null;
+            return lineText.Substring(0, at).TrimEnd() + "  # manimble:" + newCodeId;
+        }
+
+        public async Task DeleteSelectionAsync()
+        {
+            var targets = SelectionList;
+            if (targets.Count == 0) { ShowToast("请先选中对象"); return; }
+
+            if (EngineConnected)
+            {
+                try
+                {
+                    long? mark = await EngineUndoMarkAsync();
+                    int done = 0;
+                    string scene = CurrentSlide?.Name ?? "";
+                    foreach (var o in targets)
+                    {
+                        var build = FindOwningBuild(o);
+                        if (build == null || string.IsNullOrEmpty(scene)) continue;
+                        var args = new Dictionary<string, object>
+                        {
+                            ["oid"] = o.Oid,
+                            ["stop"] = CurrentSlide?.Builds.IndexOf(build) ?? 0
+                        };
+                        var r = await _engine.Edit(scene, "delete", args);
+                        if (!IsEngineFalse(r, "ok")) done++;
+                        else ShowToast("删除被拒绝：" + (GetStr(r, "error") ?? "未知原因"));
+                    }
+                    await EngineUndoMergeAsync(mark, done > 1 ? $"delete {done} objects" : "delete object");
+                    await RefreshAfterEngineEdit(null);
+                    ShowToast(done > 0 ? $"已删除 {done} 个对象" : "没有删掉任何对象");
+                }
+                catch (Exception ex) { ShowToast("删除失败：" + ex.Message); }
+                return;
+            }
+
+            var snap = Capture();
+            string before = CurrentSlide?.Source ?? "";
+            int removed = 0;
+            foreach (var o in targets)
+            {
+                var build = FindOwningBuild(o);
+                if (build == null) continue;
+                if (build.Objects.Remove(o)) removed++;
+                if (!string.IsNullOrEmpty(o.CodeId) &&
+                    SourceCodeGenerator.TryRemoveObjectLine(CurrentSlide.Source, o.CodeId, out string updated))
+                    CurrentSlide.Source = updated;
+            }
+            ClearSelection();
+            if (removed > 0)
+            {
+                NoteSourceChanged(before);
+                _history.Push(removed > 1 ? $"删除 {removed} 个对象" : "删除对象", snap);
+                ShowToast($"已删除 {removed} 个对象");
+            }
+            await Task.CompletedTask;
+        }
+
+        /// <summary>找出对象属于哪个 build（跨页粘贴后对象可能与当前页无关）。</summary>
+        private Build FindOwningBuild(CanvasObject o)
+        {
+            if (o == null) return null;
+            foreach (var s in Slides)
+                foreach (var b in s.Builds)
+                    if (b.Objects.Contains(o)) return b;
+            return null;
+        }
+
+        #endregion
+
+        #region 组合 / 层级 / 对齐 / 分布
+
+        public async Task GroupSelectionAsync(bool ungroup)
+        {
+            var targets = SelectionList;
+            if (targets.Count == 0) { ShowToast("请先选中对象"); return; }
+            if (!ungroup && targets.Count < 2) { ShowToast("请选中两个以上对象再组合"); return; }
+
+            if (EngineConnected)
+            {
+                try
+                {
+                    var args = new Dictionary<string, object>
+                    {
+                        ["oid"] = targets[0].Oid,
+                        ["oids"] = targets.Select(o => o.Oid).ToArray()
+                    };
+                    var r = await _engine.Edit(CurrentSlide.Name, ungroup ? "ungroup" : "group", args);
+                    if (IsEngineFalse(r, "ok")) { ShowToast("操作被拒绝：" + (GetStr(r, "error") ?? "未知原因")); return; }
+                    await RefreshAfterEngineEdit(null);
+                    ShowToast(ungroup ? "已取消组合" : $"已组合 {targets.Count} 个对象");
+                }
+                catch (Exception ex) { ShowToast("操作失败：" + ex.Message); }
+                return;
+            }
+
+            var snap = Capture();
+            if (ungroup)
+            {
+                foreach (var o in targets) o.GroupId = "";
+                ShowToast("已取消组合");
+            }
+            else
+            {
+                string gid = Guid.NewGuid().ToString("N").Substring(0, 6);
+                foreach (var o in targets) o.GroupId = gid;
+                ShowToast($"已组合 {targets.Count} 个对象（点击其中任意一个即选中整组）");
+            }
+            _history.Push(ungroup ? "取消组合" : "组合", snap);
+            RaiseSelectionChanged();
+            await Task.CompletedTask;
+        }
+
+        /// <summary>层级调整：front / back / forward / backward。引擎写 set_z_index，原型模式只改画布顺序。</summary>
+        public async Task ChangeOrderAsync(string how)
+        {
+            var targets = SelectionList;
+            if (targets.Count == 0) { ShowToast("请先选中对象"); return; }
+            string label = how switch
+            {
+                "front" => "置于顶层",
+                "back" => "置于底层",
+                "forward" => "上移一层",
+                "backward" => "下移一层",
+                _ => how
+            };
+
+            if (EngineConnected)
+            {
+                try
+                {
+                    var r = await _engine.EditOrder(targets.Select(o => o.Oid).ToList(), how,
+                                                    CurrentSlide?.CurrentBuildIndex ?? 0);
+                    if (IsEngineFalse(r, "ok")) { ShowToast("层级调整被拒绝：" + (GetStr(r, "error") ?? "未知原因")); return; }
+                    await RefreshAfterEngineEdit(null);
+                    ShowToast(label);
+                }
+                catch (Exception ex) { ShowToast("层级调整失败：" + ex.Message); }
+                return;
+            }
+
+            if (CurrentBuild == null) return;
+            var snap = Capture();
+            var sorted = CurrentBuild.Objects.OrderBy(o => o.Z).ToList();
+            for (int i = 0; i < sorted.Count; i++) sorted[i].Z = i;
+            var set = new HashSet<CanvasObject>(targets);
+
+            switch (how)
+            {
+                case "front":
+                case "back":
+                {
+                    var movers = sorted.Where(o => set.Contains(o)).ToList();
+                    var keep = sorted.Where(o => !set.Contains(o)).ToList();
+                    var order = how == "front" ? keep.Concat(movers).ToList() : movers.Concat(keep).ToList();
+                    for (int i = 0; i < order.Count; i++) order[i].Z = i;
+                    break;
+                }
+                case "forward":
+                    // 从最上面的开始处理，逐层越过它上面那个「不在选区里」的对象
+                    for (int i = sorted.Count - 2; i >= 0; i--)
+                        if (set.Contains(sorted[i]) && !set.Contains(sorted[i + 1]))
+                        {
+                            int z = sorted[i].Z;
+                            sorted[i].Z = sorted[i + 1].Z;
+                            sorted[i + 1].Z = z;
+                        }
+                    break;
+                case "backward":
+                    for (int i = 1; i < sorted.Count; i++)
+                        if (set.Contains(sorted[i]) && !set.Contains(sorted[i - 1]))
+                        {
+                            int z = sorted[i].Z;
+                            sorted[i].Z = sorted[i - 1].Z;
+                            sorted[i - 1].Z = z;
+                        }
+                    break;
+            }
+
+            // 归一化，避免 Z 越拉越大导致后续排序不稳
+            var final = CurrentBuild.Objects.OrderBy(o => o.Z).ToList();
+            for (int i = 0; i < final.Count; i++) final[i].Z = i;
+
+            _history.Push(label, snap);
+            ShowToast(label + "（连接引擎后会写入 set_z_index）");
+            await Task.CompletedTask;
+        }
+
+        public Task AlignSelectionAsync(string how)
+        {
+            var targets = SelectionList;
+            if (targets.Count == 0) { ShowToast("请先选中对象"); return Task.CompletedTask; }
+            string label = how switch
+            {
+                "left" => "左对齐",
+                "center" => "水平居中",
+                "right" => "右对齐",
+                "top" => "顶端对齐",
+                "middle" => "垂直居中",
+                "bottom" => "底端对齐",
+                _ => "对齐"
+            };
+            var deltas = ArrangeService.Align(targets, how, 1280, 720);
+            return ApplyDeltasAsync(deltas, label);
+        }
+
+        public Task DistributeSelectionAsync(bool horizontal)
+        {
+            var targets = SelectionList;
+            if (targets.Count < 3) { ShowToast("分布需要至少三个对象"); return Task.CompletedTask; }
+            var deltas = ArrangeService.Distribute(targets, horizontal);
+            return ApplyDeltasAsync(deltas, horizontal ? "水平分布" : "垂直分布");
+        }
+
+        /// <summary>
+        /// 把一批位移落到画布与源码上。
+        /// 引擎模式：每个对象一条 move，用 undo_mark/undo_merge 折成一步撤销；
+        /// 原型模式：直接改坐标 + 逐条写回它自己的源码行。
+        /// </summary>
+        private async Task ApplyDeltasAsync(List<ArrangeDelta> deltas, string label)
+        {
+            if (deltas.Count == 0) { ShowToast(label + "：已经对齐/均匀了"); return; }
+
+            if (EngineConnected)
+            {
+                try
+                {
+                    long? mark = await EngineUndoMarkAsync();
+                    int failed = 0;
+                    foreach (var d in deltas)
+                    {
+                        // 先动本地：画布立刻有反馈；随后按引擎状态刷新，失败的改动会被覆盖，不留脏数据
+                        d.Object.X += d.Dx;
+                        d.Object.Y += d.Dy;
+                        var args = new Dictionary<string, object>
+                        {
+                            ["oid"] = d.Object.Oid,
+                            ["stop"] = CurrentSlide?.CurrentBuildIndex ?? 0,
+                            ["dx"] = d.Dx,
+                            ["dy"] = d.Dy
+                        };
+                        if (IsEngineFalse(await _engine.Edit(CurrentSlide.Name, "move", args), "ok")) failed++;
+                    }
+                    await EngineUndoMergeAsync(mark, label);
+                    await RefreshAfterEngineEdit(null);
+                    ShowToast(failed == 0
+                        ? $"{label} · {deltas.Count} 个对象"
+                        : $"{label} · {deltas.Count - failed} 个已移动，{failed} 个未能移动（引擎拒绝了这一处）");
+                }
+                catch (Exception ex) { ShowToast(label + "失败：" + ex.Message); }
+                return;
+            }
+
+            var snap = Capture();
+            foreach (var d in deltas)
+            {
+                d.Object.X += d.Dx;
+                d.Object.Y += d.Dy;
+                CommitObjectMove(d.Object);
+            }
+            _history.Push(label, snap);
+            ShowToast($"{label} · {deltas.Count} 个对象");
+        }
+
+        #endregion
+
+        #region 引擎编辑辅助
+
+        private async Task<long?> EngineUndoMarkAsync()
+            => EngineIntegration.ParseUndoMark(await _engine.UndoMark());
+
+        /// <summary>
+        /// 把一串单对象编辑折成一步撤销。
+        /// mark 用 long? 而不是数值哨兵：引擎的 _undo_seq 从 0 开始，undo_mark 正常返回 {mark: 0}，
+        /// 若拿 0 当「没有标记」，连接引擎后的第一次多对象操作就永远不会合并（变成 N 步撤销）。
+        /// </summary>
+        private Task EngineUndoMergeAsync(long? mark, string label)
+            => mark.HasValue ? _engine.UndoMerge(mark.Value, label) : Task.CompletedTask;
+
+        /// <summary>引擎改动后刷新：scene 为空时刷新当前页。</summary>
+        public async Task RefreshAfterEngineEdit(string scene)
+        {
+            if (!EngineConnected) return;
+            var slide = string.IsNullOrEmpty(scene)
+                ? CurrentSlide
+                : Slides.FirstOrDefault(s => string.Equals(s.Name, scene, StringComparison.Ordinal));
+            if (slide == null) return;
+            await _engine.Refresh(slide);
+        }
+
+        /// <summary>全部替换这类跨页改动后，把每一页都刷新一遍。</summary>
+        public async Task RefreshAllEngineSlides()
+        {
+            if (!EngineConnected) return;
+            foreach (var s in Slides.ToList())
+                await _engine.Refresh(s);
+        }
+
+        private static bool IsEngineFalse(System.Text.Json.JsonElement e, string name)
+            => e.ValueKind == System.Text.Json.JsonValueKind.Object
+               && e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.False;
+
+        private static string GetStr(System.Text.Json.JsonElement e, string name)
+            => e.ValueKind == System.Text.Json.JsonValueKind.Object && e.TryGetProperty(name, out var v)
+               && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+
+        // 注意两处都先判 ValueKind == Number：.NET 8 的 JsonElement.TryGetDouble 对 null/字符串元素会抛
+        // InvalidOperationException（只有 TryGetInt32 是安全的），引擎会给出 "fontSize": null 这类值。
+        private static double GetDouble(System.Text.Json.JsonElement e, string name, int index, double def)
+        {
+            if (e.ValueKind != System.Text.Json.JsonValueKind.Object) return def;
+            if (!e.TryGetProperty(name, out var arr) || arr.ValueKind != System.Text.Json.JsonValueKind.Array) return def;
+            var list = arr.EnumerateArray().ToList();
+            return index < list.Count && IsNumber(list[index]) && list[index].TryGetDouble(out double d) ? d : def;
+        }
+
+        private static double[] GetDoubleArray(System.Text.Json.JsonElement e, string name)
+        {
+            if (e.ValueKind != System.Text.Json.JsonValueKind.Object) return Array.Empty<double>();
+            if (!e.TryGetProperty(name, out var arr) || arr.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return Array.Empty<double>();
+            return arr.EnumerateArray().Select(v => IsNumber(v) && v.TryGetDouble(out double d) ? d : 0).ToArray();
+        }
+
+        private static bool IsNumber(System.Text.Json.JsonElement v)
+            => v.ValueKind == System.Text.Json.JsonValueKind.Number;
+
+        #endregion
+
         #endregion
 
         #region 源码编辑 / 预览 / 终端
@@ -386,22 +1154,111 @@ namespace ManimbleWin.ViewModels
         private int _selectedDrawerTab;
         public int SelectedDrawerTab { get => _selectedDrawerTab; set => SetProperty(ref _selectedDrawerTab, value); }
 
+        // 备注写回：输入时只改内存，停手 800ms（或切页/失焦）后再发 RPC，避免每敲一个字都重渲染。
+        // 纯内存模式（未连引擎）不启动定时器，行为与以前一致。
+        private readonly System.Windows.Threading.DispatcherTimer _notesTimer;
+        private Slide _notesSlide;
+        private readonly HashSet<string> _pendingNoteKinds = new HashSet<string>();
+        private string _slideNotesPending = "";
+        private string _buildNotesPending = "";
+        private string _altTextPending = "";
+        private int? _buildNotesStopPending;
+
+        /// <summary>引擎重渲染某页时用它判断要不要跳过备注回写，避免覆盖用户正在输入的内容。</summary>
+        public bool HasPendingNotes(Slide slide) => slide != null && ReferenceEquals(_notesSlide, slide) && _pendingNoteKinds.Count > 0;
+
         public string SlideNotesText
         {
             get => CurrentSlide?.Builds.FirstOrDefault()?.Notes ?? "";
-            set { if (CurrentSlide?.Builds.Count > 0) { CurrentSlide.Builds[0].Notes = value; RaisePropertyChanged(nameof(SlideNotesText)); } }
+            set
+            {
+                if (CurrentSlide?.Builds.Count > 0)
+                {
+                    CurrentSlide.Builds[0].Notes = value;
+                    RaisePropertyChanged(nameof(SlideNotesText));
+                    ScheduleNoteWriteBack("slide", value);
+                }
+            }
         }
 
         public string BuildNotesText
         {
             get => CurrentBuild?.BuildNotes ?? "";
-            set { if (CurrentBuild != null) { CurrentBuild.BuildNotes = value; RaisePropertyChanged(nameof(BuildNotesText)); } }
+            set
+            {
+                if (CurrentBuild != null)
+                {
+                    CurrentBuild.BuildNotes = value;
+                    RaisePropertyChanged(nameof(BuildNotesText));
+                    ScheduleNoteWriteBack("build", value, CurrentSlide.CurrentBuildIndex);
+                }
+            }
         }
 
         public string AltTextText
         {
             get => CurrentSlide?.AltText ?? "";
-            set { if (CurrentSlide != null) { CurrentSlide.AltText = value; RaisePropertyChanged(nameof(AltTextText)); } }
+            set
+            {
+                if (CurrentSlide != null)
+                {
+                    CurrentSlide.AltText = value;
+                    RaisePropertyChanged(nameof(AltTextText));
+                    ScheduleNoteWriteBack("alt", value);
+                }
+            }
+        }
+
+        private void ScheduleNoteWriteBack(string kind, string value, int? stop = null)
+        {
+            if (!EngineConnected || CurrentSlide == null) return;   // 未连引擎：保持纯内存
+            if (kind == "slide") _slideNotesPending = value ?? "";
+            else if (kind == "build") { _buildNotesPending = value ?? ""; _buildNotesStopPending = stop; }
+            else _altTextPending = value ?? "";
+            _notesSlide = CurrentSlide;
+            _pendingNoteKinds.Add(kind);
+            _notesTimer.Stop();
+            _notesTimer.Start();
+        }
+
+        private void FlushPendingNotesNow()
+        {
+            if (_notesTimer == null || _pendingNoteKinds.Count == 0) return;
+            _notesTimer.Stop();
+            var slide = _notesSlide;
+            var kinds = new HashSet<string>(_pendingNoteKinds);
+            string slideNotes = _slideNotesPending, buildNotes = _buildNotesPending, alt = _altTextPending;
+            int? stop = _buildNotesStopPending;
+            _pendingNoteKinds.Clear();
+            _notesSlide = null;
+            if (slide == null || !EngineConnected) return;
+            _ = WriteBackNotes(slide, kinds, slideNotes, buildNotes, stop, alt);
+        }
+
+        /// <summary>立即提交未写回的备注（文本域失焦、切页、打开演讲者视图时调用）。</summary>
+        public void FlushNotes() => FlushPendingNotesNow();
+
+        /// <summary>打开演讲者视图前调用：先把未提交的备注写回，避免静帧备注与抽屉里的内容不一致。</summary>
+        public void FlushNotesForPresenter() => FlushPendingNotesNow();
+
+        private async Task WriteBackNotes(Slide slide, HashSet<string> kinds, string slideNotes,
+                                          string buildNotes, int? stop, string alt)
+        {
+            string scene = slide.Name;
+            bool failed = false;
+            try
+            {
+                if (kinds.Contains("slide") && !await _engine.NotesSet(scene, slideNotes, null)) failed = true;
+                if (kinds.Contains("build") && !await _engine.NotesSet(scene, buildNotes, stop)) failed = true;
+                if (kinds.Contains("alt") && !await _engine.AltTextSet(scene, alt)) failed = true;
+            }
+            catch (Exception ex)
+            {
+                ShowToast("备注写回失败：" + ex.Message);
+                return;
+            }
+            // 只报告结果，不把引擎的值写回模型：用户此刻的输入必须原样保留在编辑器里。
+            if (failed) ShowToast("备注写回失败，输入内容已保留（稍后会自动重试或可再次编辑）");
         }
 
         #endregion
@@ -438,23 +1295,27 @@ namespace ManimbleWin.ViewModels
             SelectObjectCommand = new RelayCommand(p => { if (p is CanvasObject o) SelectedObject = o; });
             SetThemeCommand = new RelayCommand(p => { if (p is DeckTheme t) ApplyTheme(t); });
             NudgeCommand = new RelayCommand(p => Nudge(p?.ToString() ?? ""));
-            OpenFindCommand = new RelayCommand(_ => { ShowToast("查找和替换 — 原型模式"); });
+            OpenFindCommand = new RelayCommand(_ => OpenFind(false));
             ConnectEngineCommand = new RelayCommand(_ => _ = ConnectEngine());
             OpenDependencyCenterCommand = new RelayCommand(_ => OpenDependencyCenter(false));
             RenderFormulaCommand = new RelayCommand(p => _ = RenderFormulaInteractive(p?.ToString()));
             RerenderFormulaCommand = new RelayCommand(_ => RerenderSelectedFormula());
             EditFormulaCommand = new RelayCommand(_ => EditSelectedFormula());
+            ReplaceImageCommand = new RelayCommand(_ => _ = ReplaceSelectedImage());
+            ExtractImagesCommand = new RelayCommand(_ => _ = ExtractImages());
             ApplySourceEditCommand = new RelayCommand(_ => ApplySourceEdit());
             RevertSourceEditCommand = new RelayCommand(_ => RevertSourceEdit());
             OpenPreviewCommand = new RelayCommand(_ => OpenPreview());
             Terminal = new TerminalViewModel(this);
+            Find = new FindViewModel(this);
 
             BuildThemes();
             BuildSampleDeck();
             ThemeManager.Apply(IsDarkMode);
 
             // 让画布主题跟随 deck 主题
-            CurrentTheme = Themes.FirstOrDefault(t => t.Id == "midnight");
+            CurrentTheme = Themes.FirstOrDefault(t => t.Id == "midnight") ?? Themes.FirstOrDefault();
+            _deckThemeApplied = CurrentTheme;
             CurrentSlide = Slides.FirstOrDefault();
 
             // 引擎桥接
@@ -487,6 +1348,10 @@ namespace ManimbleWin.ViewModels
                 if (target != null) ApplyFormulaEdit(target);
             };
 
+            // 备注写回的防抖：抽屉里停手 800ms 才把备注/替代文本写回引擎并重渲染
+            _notesTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+            _notesTimer.Tick += (s, e) => FlushPendingNotesNow();
+
             // 首次启动：窗口呈现后再弹出环境准备向导，避免阻塞主窗口构造
             Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
             {
@@ -500,16 +1365,23 @@ namespace ManimbleWin.ViewModels
 
         #region 数据构建
 
+        /// <summary>
+        /// 主题清单来自 engine/manimble/themes/*.py（8 套的真实色板），不再在这里硬编码：
+        /// 硬编码的色值早就和引擎里的主题文件对不上（例如 Paper 的背景在文件里是 #FFFFFF）。
+        /// 读不到文件时退回到一套 Midnight，保证界面不会空着。
+        /// </summary>
         private void BuildThemes()
         {
-            // 取自 engine/manimble/themes/*.py 的常量
-            Themes.Add(new DeckTheme { Id = "midnight", Name = "Midnight", Background = "#000000", Text = "#FFFFFF", Muted = "#9AA0A6", Accent = "#7C5CFF", Font = "DejaVu Sans" });
-            Themes.Add(new DeckTheme { Id = "paper", Name = "Paper", Background = "#F7F5EF", Text = "#1A1A1A", Muted = "#6B6B6B", Accent = "#C1440E", Font = "Georgia" });
-            Themes.Add(new DeckTheme { Id = "chalkboard", Name = "Chalkboard", Background = "#1F2A24", Text = "#F2F0E6", Muted = "#A9B8AE", Accent = "#8FD19E", Font = "Comic Sans MS" });
-            Themes.Add(new DeckTheme { Id = "ember", Name = "Ember", Background = "#1A1012", Text = "#FBE9E2", Muted = "#C08A7A", Accent = "#FF6C0C", Font = "Segoe UI" });
-            Themes.Add(new DeckTheme { Id = "slate", Name = "Slate", Background = "#2B3038", Text = "#EDF1F5", Muted = "#9AA6B2", Accent = "#5B9BD5", Font = "Segoe UI" });
-            Themes.Add(new DeckTheme { Id = "parchment", Name = "Parchment", Background = "#EFE2C4", Text = "#3B2E16", Muted = "#7A6840", Accent = "#8B5E3C", Font = "Palatino Linotype" });
-            Themes.Add(new DeckTheme { Id = "terminal", Name = "Terminal", Background = "#0C0C0C", Text = "#33FF66", Muted = "#1FA347", Accent = "#33FF66", Font = "Consolas" });
+            IReadOnlyList<DeckTheme> loaded = DeckThemeService.LoadAll();
+            foreach (DeckTheme t in loaded) Themes.Add(t);
+            if (Themes.Count == 0)
+            {
+                Themes.Add(new DeckTheme
+                {
+                    Id = "midnight", Name = "Midnight", Background = "#000000", Text = "#FFFFFF",
+                    Muted = "#BBBBBB", Accent = "#7C5CFF", Font = "Helvetica Neue"
+                });
+            }
         }
 
         private CanvasObject Txt(string text, double x, double y, double w, double h, double size, string color, int line, bool bold = false)
@@ -646,25 +1518,167 @@ namespace ManimbleWin.ViewModels
 
         #region 交互逻辑
 
-        private void ApplyTheme(DeckTheme t)
+        #region deck 主题与演示文稿配色（走引擎）
+
+        /// <summary>最近一次真正写进 deck 的主题：取消选择器时用它把工具栏下拉框拨回去。</summary>
+        private DeckTheme _deckThemeApplied;
+        private bool _themePickerBusy;
+
+        /// <summary>
+        /// 工具栏色块下拉选了主题：不立刻应用，先打开确认面板做一次预览。
+        /// 应用会改写 common.py / manim.cfg 并重渲染每一页，误点代价太大（macOS 版也是「预览 → Apply」两步）。
+        /// </summary>
+        public void SelectThemeFromUi(DeckTheme theme)
         {
-            CurrentTheme = t;
-            ShowToast($"已应用主题：{t.Name}");
+            if (theme == null || _themePickerBusy) return;
+            if (_deckThemeApplied != null && theme.Id == _deckThemeApplied.Id) return;  // 选回当前主题，什么也不用做
+            OpenThemePicker(theme);
         }
+
+        /// <summary>「格式 ▸ 主题…」、工具栏「主题」按钮、色块下拉共用这一个入口。</summary>
+        public void OpenThemePicker(DeckTheme preset = null)
+        {
+            if (_themePickerBusy) return;
+
+            DeckTheme previous = _deckThemeApplied ?? CurrentTheme;
+            if (!EngineConnected)
+            {
+                ShowToast("主题要改 deck 源码：请先「引擎 ▸ 连接 Manim 引擎」");
+                CurrentTheme = previous;
+                return;
+            }
+
+            _themePickerBusy = true;
+            try
+            {
+                var vm = new ThemePickerViewModel(this, _engine, preset ?? CurrentTheme);
+                var dialog = new Views.ThemePickerDialog { DataContext = vm };
+                if (Application.Current?.MainWindow is Window owner && owner.IsVisible)
+                    dialog.Owner = owner;
+
+                bool accepted = dialog.ShowDialog() == true && vm.Applied;
+                if (accepted)
+                {
+                    _deckThemeApplied = vm.AppliedTheme;
+                    CurrentTheme = vm.AppliedTheme;
+                    ShowToast("已保存 · " + (string.IsNullOrEmpty(vm.ResultMessage) ? vm.AppliedTheme?.Name : vm.ResultMessage));
+                    _ = RefreshDeckAfterThemeAsync(vm.AppliedToSlideOnly);
+                }
+                else
+                {
+                    CurrentTheme = previous;                                  // 取消：下拉框回到 deck 的真实主题
+                    if (!string.IsNullOrEmpty(vm.Error)) ShowToast(vm.Error); // 引擎的 error 原样给用户
+                }
+            }
+            catch (Exception ex)
+            {
+                CurrentTheme = previous;
+                ShowToast("主题面板打开失败：" + ex.Message);
+            }
+            finally
+            {
+                _themePickerBusy = false;
+            }
+        }
+
+        /// <summary>主题改完刷新画布：仅本页时只刷这一页，改整份 deck 时全刷（每页背景都变了）。</summary>
+        private async Task RefreshDeckAfterThemeAsync(bool slideOnly)
+        {
+            try
+            {
+                if (slideOnly) await RefreshAfterEngineEdit(null);
+                else await RefreshAllEngineSlides();
+            }
+            catch (Exception ex)
+            {
+                ShowToast("主题已应用，但画布刷新失败：" + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 演示文稿深色 / 反色：走引擎 <c>darkmode</c>，把颜色映射写进源码（一步撤销），与应用界面无关。
+        /// 不要把这一步和主题的 flip 叠加：引擎在 theme 里自己会以 _nested 方式调一次 dark_mode，
+        /// 这里只在用户显式点菜单时才发请求。
+        /// </summary>
+        private async Task ApplyDeckColorsAsync(string mode)
+        {
+            if (!EngineConnected)
+            {
+                ShowToast("演示文稿配色要改源码：请先「引擎 ▸ 连接 Manim 引擎」");
+                return;
+            }
+
+            string label = mode == "invert" ? "反色" : "深色模式";
+            BusyText = "正在把" + label + "写入演示文稿…";
+            try
+            {
+                var r = await _engine.DarkMode(CurrentSlide?.Name ?? "", mode);
+                if (IsEngineFalse(r, "ok"))
+                {
+                    ShowToast(GetStr(r, "error") ?? (label + "应用失败"));
+                    return;
+                }
+                string msg = GetStr(r, "message");
+                ShowToast(msg == "no change" ? "没有需要变换的颜色" : "已保存 · " + (msg ?? label));
+                await RefreshAllEngineSlides();      // 每一页的颜色都可能变了
+            }
+            catch (Exception ex)
+            {
+                ShowToast(label + "应用失败：" + ex.Message);
+            }
+            finally
+            {
+                BusyText = "";
+            }
+        }
+
+        private void ApplyTheme(DeckTheme t) => SelectThemeFromUi(t);
+
+        /// <summary>
+        /// 连上引擎后把「deck 真实在用的主题」同步到界面：下拉框显示 deck 实际那套，
+        /// 而不是本地默认的 Midnight（否则取消选择器时会拨回一个错误的值）。
+        /// </summary>
+        public async Task SyncDeckThemeFromEngineAsync()
+        {
+            if (!EngineConnected) return;
+            try
+            {
+                var r = await _engine.ThemeGet(null, CurrentSlide?.Name ?? "");
+                string name = GetStr(r, "theme");
+                if (string.IsNullOrEmpty(name)) return;
+                DeckTheme t = Themes.FirstOrDefault(x => x.Name == name);
+                if (t == null) return;
+                _deckThemeApplied = t;
+                CurrentTheme = t;
+            }
+            catch (Exception)
+            {
+                // 主题信息读不到不影响连接本身，保持当前显示即可
+            }
+        }
+
+        #endregion
 
         private void Nudge(string dir)
         {
-            if (SelectedObject == null) return;
+            if (SelectedObjects.Count == 0) return;
             double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 2;
-            switch (dir)
+
+            // 一次微调 = 一步撤销，且连续微调折叠成一步（与拖动的手感一致，不会刷出几十步历史）
+            DeckSnapshot snap = EngineConnected ? null : Capture();
+            foreach (var o in SelectedObjects.ToList())
             {
-                case "Left": SelectedObject.X -= step; break;
-                case "Right": SelectedObject.X += step; break;
-                case "Up": SelectedObject.Y -= step; break;
-                case "Down": SelectedObject.Y += step; break;
+                switch (dir)
+                {
+                    case "Left": o.X -= step; break;
+                    case "Right": o.X += step; break;
+                    case "Up": o.Y -= step; break;
+                    case "Down": o.Y += step; break;
+                }
+                // 方向键微调同样写回源码坐标
+                CommitObjectMove(o);
             }
-            // 方向键微调同样写回源码坐标
-            CommitObjectMove(SelectedObject);
+            if (snap != null) _history.Push("微调位置", snap, mergeKey: "nudge");
         }
 
         public void ShowToast(string text)
@@ -678,6 +1692,31 @@ namespace ManimbleWin.ViewModels
 
         public void MoveObject(CanvasObject o, double dx, double dy) { o.X += dx; o.Y += dy; }
 
+        /// <summary>「幻灯片 ▸ 背景与页码…」：背景和页码都是写进 deck 源码的属性，必须经引擎。</summary>
+        public void OpenSlideSetup()
+        {
+            if (!EngineConnected)
+            {
+                ShowToast("背景与页码要改 deck 源码：请先「引擎 ▸ 连接 Manim 引擎」");
+                return;
+            }
+            try
+            {
+                var vm = new SlideSetupViewModel(this, _engine);
+                var dlg = new Views.SlideSetupDialog
+                {
+                    DataContext = vm,
+                    Owner = Application.Current?.MainWindow != null && Application.Current.MainWindow.IsVisible
+                        ? Application.Current.MainWindow : null
+                };
+                dlg.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                ShowToast("打开背景与页码失败：" + ex.Message);
+            }
+        }
+
         private void ExecuteToolbar(string action)
         {
             switch (action)
@@ -685,13 +1724,16 @@ namespace ManimbleWin.ViewModels
                 case "NewSlide": NewSlideFromToolbar(); break;
                 case "NewBuild": NewBuild(); break;
                 case "ExpandAll": ShowToast("已展开导航器中的所有构建"); break;
-                case "Theme": ShowToast("主题菜单（在工具栏选择色块）"); break;
-                case "DarkMode": IsDarkMode = !IsDarkMode; ShowToast(IsDarkMode ? "深色模式已开启" : "深色模式已关闭"); break;
+                case "Theme": OpenThemePicker(); break;
+                // 工具栏的月亮只切应用界面，不动 deck（演示文稿配色在「格式」菜单里）
+                case "DarkMode": IsDarkMode = !IsDarkMode; ShowToast(IsDarkMode ? "界面已切换为深色" : "界面已切换为浅色"); break;
                 case "Terminal": ShowTerminalPanel(); break;
+                case "BioCartoon": OpenBioCartoon(); break;
+                case "PythonPlot": OpenPythonPlot(); break;
                 case "ZoomIn": Zoom += 0.1; break;
                 case "ZoomOut": Zoom -= 0.1; break;
                 case "ZoomFit": Zoom = 0.72; break;
-                case "Share": ShowToast("导出 / 分享 — 原型模式"); break;
+                case "Share": _ = PackageProjectAsync(); break;
                 case "ToggleDrawer": DrawerVisible = !DrawerVisible; break;
                 case "ToggleNavigator": NavigatorVisible = !NavigatorVisible; break;
                 case "ToggleInspector": InspectorVisible = !InspectorVisible; break;
@@ -726,6 +1768,7 @@ namespace ManimbleWin.ViewModels
 
         private void InsertObject(string kind)
         {
+            if (kind == "Image") { _ = InsertImage(); return; }
             if (CurrentBuild == null) return;
             CanvasObject o;
             switch (kind)
@@ -761,6 +1804,427 @@ namespace ManimbleWin.ViewModels
                     _ = _engine.ApplyTextEdit(CurrentSlide, before, CurrentSlide.Source);
             }
             ShowToast($"已插入 {kind} · Python 代码已同步");
+        }
+
+        /// <summary>
+        /// 选择一张图片复制到当前 deck 的 assets 目录，返回相对 deck 的正斜杠路径与落地绝对路径。
+        /// 同名文件加 _1/_2 后缀避免覆盖引擎正在引用的旧资源。
+        /// </summary>
+        private (string relative, string dest) CopyImageIntoDeck(string sourceFile)
+        {
+            string deck = _engine?.DeckPath;
+            if (string.IsNullOrEmpty(deck) || !Directory.Exists(deck)) deck = EnvironmentService.SampleDeck;
+            Directory.CreateDirectory(deck);
+            string assets = Path.Combine(deck, "assets");
+            Directory.CreateDirectory(assets);
+
+            string name = Path.GetFileName(sourceFile);
+            string stem = Path.GetFileNameWithoutExtension(name);
+            string ext = Path.GetExtension(name);
+            string dest = Path.Combine(assets, name);
+            int n = 1;
+            while (File.Exists(dest)) dest = Path.Combine(assets, stem + "_" + n++ + ext);
+            File.Copy(sourceFile, dest, false);
+
+            string relative = "assets/" + Path.GetFileName(dest).Replace('\\', '/');
+            return (relative, dest);
+        }
+
+        private static Microsoft.Win32.OpenFileDialog NewImageDialog(string title)
+            => new Microsoft.Win32.OpenFileDialog
+            {
+                Title = title,
+                Filter = "图片|*.png;*.jpg;*.jpeg;*.svg;*.webp;*.gif|所有文件|*.*"
+            };
+
+        /// <summary>插入图片：连引擎时走引擎写回；未连时保留本地占位并写回源码。</summary>
+        private async Task InsertImage()
+        {
+            var dlg = NewImageDialog("选择图片");
+            if (dlg.ShowDialog() != true) return;
+
+            var (relative, dest) = CopyImageIntoDeck(dlg.FileName);
+
+            if (EngineConnected && CurrentSlide != null)
+            {
+                bool ok = await _engine.InsertViaEngine(CurrentSlide,
+                    Math.Max(0, CurrentSlide.CurrentBuildIndex), "image",
+                    new { file = relative, width = 4.0 });
+                ShowToast(ok ? "已通过引擎插入图片" : "引擎插入图片失败，请查看日志");
+                return;
+            }
+
+            // 未连引擎：本地占位 + 写回源码，保证原型模式闭环
+            if (CurrentBuild == null) return;
+            var o = new CanvasObject
+            {
+                Kind = ObjectKind.Image,
+                ImagePath = dest,
+                ImageLabel = Path.GetFileName(dest),
+                X = 460, Y = 260, Width = 380, Height = 220,
+                Color = "#FFFFFF",
+                Z = CurrentBuild.Objects.Count
+            };
+            CurrentBuild.Objects.Add(o);
+            SelectedObject = o;
+
+            string before = CurrentSlide.Source;
+            if (string.IsNullOrEmpty(o.CodeId)) o.CodeId = SourceCodeGenerator.NewCodeId();
+            string line = SourceCodeGenerator.LineFor(o, SlideDisplayWidth / Zoom, SlideDisplayHeight / Zoom);
+            CurrentSlide.Source = SourceCodeGenerator.AppendLine(before, line);
+            o.SourceLine = CountLine(CurrentSlide.Source, line);
+            o.Loc = $"{CurrentSlide.File}:{o.SourceLine}";
+            RebuildSourceLines();
+            SyncSourceText();
+            SourceEditStatus = "代码已更新（待应用）";
+            ShowToast("未连接引擎，仅本地预览");
+        }
+
+        /// <summary>更换选中图片对象的图片文件：仅连引擎时可用，走 replace_image 一步撤销。</summary>
+        private async Task ReplaceSelectedImage()
+        {
+            if (!EngineConnected) { ShowToast("未连接引擎，无法更换图片"); return; }
+            var o = SelectedObject;
+            if (o == null || o.Kind != ObjectKind.Image || CurrentSlide == null)
+            {
+                ShowToast("请先选中一个图片对象");
+                return;
+            }
+            if (string.IsNullOrEmpty(o.Oid) || !int.TryParse(o.Oid, out _))
+            {
+                ShowToast("该图片对象来自本地预览，请连接引擎后重新插入图片");
+                return;
+            }
+
+            var dlg = NewImageDialog("更换图片");
+            if (dlg.ShowDialog() != true) return;
+
+            var (relative, dest) = CopyImageIntoDeck(dlg.FileName);
+            try
+            {
+                var r = await _engine.ReplaceImage(CurrentSlide.Name, o.Oid, relative);
+                bool ok = r.ValueKind != JsonValueKind.Object
+                          || !r.TryGetProperty("ok", out var okEl)
+                          || okEl.ValueKind != JsonValueKind.False;
+                if (!ok)
+                {
+                    string err = r.ValueKind == JsonValueKind.Object && r.TryGetProperty("error", out var e)
+                        && e.ValueKind == JsonValueKind.String ? e.GetString() : "未知错误";
+                    ShowToast("更换图片失败：" + err);
+                    return;
+                }
+                o.ImageLabel = Path.GetFileName(dest);
+                await _engine.Refresh(CurrentSlide);
+                ShowToast("图片已更换");
+            }
+            catch (Exception ex)
+            {
+                ShowToast("更换图片失败：" + ex.Message);
+            }
+        }
+
+        // ---------------------------------------------------------- BioCartoon 插画库
+
+        private Window _bioCartoonWindow;
+
+        /// <summary>打开 BioCartoon 插画库浮层（独立窗口，简单可靠；重复调用只激活已有窗口）。</summary>
+        public void OpenBioCartoon()
+        {
+            if (_bioCartoonWindow != null && _bioCartoonWindow.IsVisible)
+            {
+                _bioCartoonWindow.Activate();
+                return;
+            }
+            var vm = new BioCartoonViewModel(_engine, InsertBioCartoonAsync);
+            var panel = new Views.BioCartoonPanel { DataContext = vm };
+            var win = new Window
+            {
+                Title = "BioCartoon 插画库",
+                Content = panel,
+                Width = 820, Height = 620,
+                MinWidth = 560, MinHeight = 420,
+                Owner = Application.Current?.MainWindow,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            win.SetResourceReference(Window.BackgroundProperty, "ChromeBackgroundBrush");
+            win.Closed += (s, e) => { if (_bioCartoonWindow == win) _bioCartoonWindow = null; };
+            _bioCartoonWindow = win;
+            win.Show();
+        }
+
+        /// <summary>
+        /// 插入一个 BioCartoon 图标：fetch SVG+PNG 到临时目录 → svg_icon prepare（manim 能否按 PNG 画出矢量）→
+        /// 落一份到 deck/assets → 走引擎插 image（宽 3）。矢量不可靠时回退 PNG 位图，并在返回消息里说明。
+        /// 署名信息追加到本页 alt text（对象级备注不可行，选可行的 alt text）。返回给面板显示的中文状态。
+        /// </summary>
+        private async Task<string> InsertBioCartoonAsync(BioCartoonItem item)
+        {
+            if (!EngineConnected) return "请先「引擎 ▸ 连接 Manim 引擎」再插入图标。";
+            if (CurrentSlide == null) return "请先选择一张幻灯片。";
+
+            string safeId = string.Concat((item.Id ?? "icon").Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_'));
+            if (string.IsNullOrEmpty(safeId)) safeId = "icon";
+            string tmpRoot = Path.Combine(EnvironmentService.TempDir, "biocartoon-insert", Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(tmpRoot);
+                string tmpSvg = Path.Combine(tmpRoot, safeId + ".svg");
+                string tmpPng = Path.Combine(tmpRoot, safeId + ".png");
+                string readySvg = Path.Combine(tmpRoot, safeId + "-ready.svg");
+
+                var frSvg = await _engine.BioFetch(item.Id, tmpSvg, "svg");
+                if (IsEngineFalse(frSvg, "ok") || !File.Exists(tmpSvg))
+                    return "下载 SVG 失败：" + (GetStr(frSvg, "error") ?? "未知错误");
+                var frPng = await _engine.BioFetch(item.Id, tmpPng, "png");
+                if (IsEngineFalse(frPng, "ok") || !File.Exists(tmpPng))
+                    return "下载 PNG 失败：" + (GetStr(frPng, "error") ?? "未知错误");
+
+                bool svgOk = false;
+                try
+                {
+                    var prep = await _engine.Request("svg_icon",
+                        new { svg = tmpSvg, png = tmpPng, @out = readySvg }, 120000);
+                    svgOk = !IsEngineFalse(prep, "ok") && File.Exists(readySvg);
+                }
+                catch { svgOk = false; }
+
+                string sourceFile = svgOk ? readySvg : tmpPng;
+                var (relative, dest) = CopyImageIntoDeck(sourceFile);
+                bool ok = await _engine.InsertViaEngine(CurrentSlide,
+                    Math.Max(0, CurrentSlide.CurrentBuildIndex), "image",
+                    new { file = relative, width = 3.0 });
+                if (!ok) return "插入失败，请查看引擎日志。";
+
+                // 署名写进本页 alt text（可行且持久）；对象级备注引擎未提供入口。
+                string credit = string.IsNullOrEmpty(item.Credit)
+                    ? $"{item.Title} · {item.License} · {item.SourceLabel}"
+                    : item.Credit;
+                try
+                {
+                    string existing = CurrentSlide.AltText ?? "";
+                    if (!existing.Contains(credit))
+                    {
+                        string line = "图标署名：" + credit;
+                        string combined = string.IsNullOrEmpty(existing) ? line : existing + "\n" + line;
+                        await _engine.AltTextSet(CurrentSlide.Name, combined);
+                        CurrentSlide.AltText = combined;
+                        RaisePropertyChanged(nameof(AltTextText));
+                    }
+                }
+                catch { /* 署名写回失败不影响插入本身 */ }
+
+                return svgOk
+                    ? $"已插入矢量图标：{item.Title}（{item.License}）"
+                    : $"该图标含渐变/文字，已用 PNG 位图插入：{item.Title}（{item.License}）";
+            }
+            catch (Exception ex)
+            {
+                return "插入图标出错：" + ex.Message;
+            }
+            finally
+            {
+                try { if (Directory.Exists(tmpRoot)) Directory.Delete(tmpRoot, true); } catch { }
+            }
+        }
+
+        // ---------------------------------------------------------- Python 图表
+
+        // 同一对话框会话内记住刚插入的图片 oid，重复运行时覆盖它而不是叠加
+        private string _plotTargetOid;
+
+        /// <summary>打开「Python 图表」对话框。</summary>
+        public void OpenPythonPlot()
+        {
+            _plotTargetOid = null;
+            var vm = new PythonPlotViewModel(RunPythonPlotAsync);
+            var dlg = new Views.PythonPlotDialog { DataContext = vm, Owner = Application.Current.MainWindow };
+            dlg.ShowDialog();
+        }
+
+        /// <summary>
+        /// 运行用户 Python 绘图代码：引擎在受控子进程里执行并输出 PNG → 落进 deck/assets →
+        /// 选中了图片对象就 ReplaceImage 覆盖原图（重复执行不叠图），否则 InsertViaEngine 插新图。
+        /// 返回 (是否成功, 给对话框显示的状态/错误)。
+        /// </summary>
+        private async Task<(bool ok, string message)> RunPythonPlotAsync(string code)
+        {
+            if (!EngineConnected) return (false, "请先「引擎 ▸ 连接 Manim 引擎」。");
+            if (CurrentSlide == null) return (false, "请先选择一张幻灯片。");
+
+            string tmpDir = Path.Combine(EnvironmentService.TempDir, "python-plot", Guid.NewGuid().ToString("N"));
+            string tmpPng = Path.Combine(tmpDir, "plot.png");
+            try
+            {
+                Directory.CreateDirectory(tmpDir);
+                var r = await _engine.PythonPlot(code, tmpPng, _engine.DeckPath);
+                bool ok = r.ValueKind != JsonValueKind.Object
+                          || !r.TryGetProperty("ok", out var okEl) || okEl.ValueKind != JsonValueKind.False;
+                if (!ok || !File.Exists(tmpPng))
+                    return (false, "绘图失败：" + (GetStr(r, "error") ?? "未生成图片"));
+
+                var (relative, dest) = CopyImageIntoDeck(tmpPng);
+
+                // 目标 oid：当前选中的图片对象优先；否则用本会话上一次插入的图片
+                string oid = null;
+                var sel = SelectedObject;
+                if (sel != null && sel.Kind == ObjectKind.Image && !string.IsNullOrEmpty(sel.Oid)
+                    && int.TryParse(sel.Oid, out _))
+                    oid = sel.Oid;
+                else if (!string.IsNullOrEmpty(_plotTargetOid))
+                    oid = _plotTargetOid;
+
+                if (!string.IsNullOrEmpty(oid))
+                {
+                    var rr = await _engine.ReplaceImage(CurrentSlide.Name, oid, relative);
+                    bool rok = rr.ValueKind != JsonValueKind.Object
+                               || !rr.TryGetProperty("ok", out var rokEl) || rokEl.ValueKind != JsonValueKind.False;
+                    if (!rok) return (false, "覆盖原图失败：" + (GetStr(rr, "error") ?? "未知错误"));
+                    await _engine.Refresh(CurrentSlide);
+                    return (true, $"已运行并覆盖原图（{Path.GetFileName(dest)}）。");
+                }
+
+                bool ins = await _engine.InsertViaEngine(CurrentSlide,
+                    Math.Max(0, CurrentSlide.CurrentBuildIndex), "image", new { file = relative, width = 4.0 });
+                if (!ins) return (false, "插入图表失败，请查看引擎日志。");
+                _plotTargetOid = CurrentBuild?.Objects.LastOrDefault(o => o.Kind == ObjectKind.Image
+                                 && !string.IsNullOrEmpty(o.Oid))?.Oid;
+                return (true, $"已运行并插入图表（{Path.GetFileName(dest)}）。再次运行会覆盖此图。");
+            }
+            catch (Exception ex)
+            {
+                return (false, "运行出错：" + ex.Message);
+            }
+            finally
+            {
+                try { if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// 提取图片：先从引擎列出 deck 中所有被引用的图片，让用户选一个文件夹，
+        /// 再由引擎把这些文件复制过去。全程不改 deck 源码，不进撤销历史。
+        /// </summary>
+        private async Task ExtractImages()
+        {
+            if (!EngineConnected) { ShowToast("未连接引擎，无法提取图片"); return; }
+            try
+            {
+                var listed = await _engine.ExtractImagesList();
+                bool ok = listed.ValueKind != JsonValueKind.Object
+                          || !listed.TryGetProperty("ok", out var okEl)
+                          || okEl.ValueKind != JsonValueKind.False;
+                if (!ok)
+                {
+                    string err = listed.ValueKind == JsonValueKind.Object && listed.TryGetProperty("error", out var e)
+                        && e.ValueKind == JsonValueKind.String ? e.GetString() : "未知错误";
+                    ShowToast("读取图片列表失败：" + err);
+                    return;
+                }
+                var images = listed.ValueKind == JsonValueKind.Object && listed.TryGetProperty("images", out var arr)
+                    && arr.ValueKind == JsonValueKind.Array ? arr.EnumerateArray().ToList() : new List<JsonElement>();
+                if (images.Count == 0) { ShowToast("这个 deck 里没有可提取的图片"); return; }
+
+                var dlg = new Microsoft.Win32.SaveFileDialog
+                {
+                    Title = $"提取 {images.Count} 张图片：选择保存位置",
+                    FileName = "选择文件夹（文件名随意）",
+                    Filter = "所有文件|*.*",
+                    AddExtension = false,
+                    OverwritePrompt = false
+                };
+                if (dlg.ShowDialog() != true) return;
+                string dir = Path.GetDirectoryName(dlg.FileName);
+                if (string.IsNullOrEmpty(dir)) return;
+
+                var saved = await _engine.ExtractImagesSave(dir);
+                bool ok2 = saved.ValueKind != JsonValueKind.Object
+                           || !saved.TryGetProperty("ok", out var okEl2)
+                           || okEl2.ValueKind != JsonValueKind.False;
+                if (!ok2)
+                {
+                    string err = saved.ValueKind == JsonValueKind.Object && saved.TryGetProperty("error", out var e2)
+                        && e2.ValueKind == JsonValueKind.String ? e2.GetString() : "未知错误";
+                    ShowToast("提取图片失败：" + err);
+                    return;
+                }
+                int n = saved.ValueKind == JsonValueKind.Object && saved.TryGetProperty("saved", out var sarr)
+                    && sarr.ValueKind == JsonValueKind.Array ? sarr.GetArrayLength() : 0;
+                ShowToast($"已提取 {n} 张图片到 {dir}");
+            }
+            catch (Exception ex)
+            {
+                ShowToast("提取图片失败：" + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 打包当前 deck 为可移植工程：选目标位置、确认是否带媒体缓存，交给引擎后台执行。
+        /// </summary>
+        private async Task PackageProjectAsync()
+        {
+            if (_packaging) { ShowToast("正在打包中，请稍候"); return; }
+            if (!EngineConnected) { ShowToast("未连接引擎，无法打包"); return; }
+
+            var answer = MessageBox.Show(
+                "是否把媒体缓存（media/）一起打进包里？\n\n"
+                + "选「是」：包含缓存，包更大但接收方首次播放更快。\n"
+                + "选「否」：只打源码与资源（推荐）。\n"
+                + "选「取消」：放弃打包。",
+                "打包项目以便分享", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (answer == MessageBoxResult.Cancel) return;
+            bool includeMedia = answer == MessageBoxResult.Yes;
+
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "打包项目以便分享",
+                FileName = "ManimbleShow.zip",
+                Filter = "ZIP 包|*.zip|文件夹|*.*",
+                AddExtension = true
+            };
+            if (dlg.ShowDialog() != true) return;
+            string target = dlg.FileName;
+
+            _packaging = true;
+            BusyText = "正在打包演示文稿…";
+            try
+            {
+                var manifest = await _engine.PackageProject(target, includeMedia);
+                if (manifest.ValueKind == JsonValueKind.Undefined)
+                {
+                    ShowToast("打包超时，请查看日志");
+                    return;
+                }
+                bool ok = manifest.ValueKind != JsonValueKind.Object
+                          || !manifest.TryGetProperty("ok", out var okEl)
+                          || okEl.ValueKind != JsonValueKind.False;
+                if (!ok)
+                {
+                    string err = manifest.ValueKind == JsonValueKind.Object
+                        && manifest.TryGetProperty("error", out var e)
+                        && e.ValueKind == JsonValueKind.String ? e.GetString() : "未知错误";
+                    ShowToast("打包失败：" + err);
+                    return;
+                }
+                int count = manifest.ValueKind == JsonValueKind.Object
+                    && manifest.TryGetProperty("count", out var c) && c.TryGetInt32(out int n) ? n : 0;
+                ShowToast($"已打包 {count} 个文件到 {Path.GetFileName(target)}");
+                if (manifest.ValueKind == JsonValueKind.Object
+                    && manifest.TryGetProperty("warnings", out var ws)
+                    && ws.ValueKind == JsonValueKind.Array && ws.GetArrayLength() > 0)
+                {
+                    string first = ws[0].ValueKind == JsonValueKind.String ? ws[0].GetString() : "";
+                    if (!string.IsNullOrEmpty(first)) ShowToast("提示：" + first);
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowToast("打包失败：" + ex.Message);
+            }
+            finally
+            {
+                _packaging = false;
+                BusyText = "";
+            }
         }
 
         private static int CountLine(string source, string line)
@@ -861,11 +2325,10 @@ namespace ManimbleWin.ViewModels
                 ShowToast("请先选中一个公式对象");
                 return;
             }
-            var dlg = new Views.FormulaDialog
-            {
-                Owner = Application.Current?.MainWindow,
-                InitialExpression = o.Value
-            };
+            var dlg = new Views.FormulaDialog { InitialExpression = o.Value };
+            // Owner 只能在「已经显示过」的窗口上设置，否则 WPF 抛 InvalidOperationException
+            var owner = Application.Current?.MainWindow;
+            if (owner != null && owner.IsVisible) dlg.Owner = owner;
             if (dlg.ShowDialog() != true || string.IsNullOrWhiteSpace(dlg.Expression)) return;
 
             o.Value = LatexService.NormalizeTex(dlg.Expression);
@@ -932,7 +2395,9 @@ namespace ManimbleWin.ViewModels
         public void InsertFormulaFromDialog()
         {
             if (CurrentBuild == null) return;
-            var dlg = new Views.FormulaDialog { Owner = Application.Current?.MainWindow };
+            var dlg = new Views.FormulaDialog();
+            var owner = Application.Current?.MainWindow;
+            if (owner != null && owner.IsVisible) dlg.Owner = owner;
             if (dlg.ShowDialog() != true || string.IsNullOrWhiteSpace(dlg.Expression)) return;
             InsertFormula(dlg.Expression);
         }
@@ -1014,30 +2479,32 @@ namespace ManimbleWin.ViewModels
                 case "NewDeck": ShowToast("文件 ▸ 新建演示文稿… — 原型模式"); break;
                 case "OpenDeck": ShowToast("文件 ▸ 打开演示文稿或项目… — 原型模式"); break;
                 case "Save": ShowToast("已保存到原始文件（模拟）"); break;
+                case "Package": _ = PackageProjectAsync(); break;
                 case "Close": Application.Current.MainWindow?.Close(); break;
                 case "Quit": Application.Current.Shutdown(); break;
 
-                case "Undo": ShowToast("撤销 — 原型模式"); break;
-                case "Redo": ShowToast("重做 — 原型模式"); break;
-                case "Cut":
-                case "DeleteSelected":
-                    if (SelectedObject != null)
-                    {
-                        var target = SelectedObject;
-                        SelectedObject = null;
-                        if (CurrentBuild != null) CurrentBuild.Objects.Remove(target);
-                        ShowToast("对象已删除");
-                    }
+                case "Undo": _ = UndoAsync(); break;
+                case "Redo": _ = RedoAsync(); break;
+                case "Cut": _ = CutSelectionAsync(); break;
+                case "DeleteSelected": _ = DeleteSelectionAsync(); break;
+                case "Copy": _ = CopySelectionAsync(); break;
+                case "Paste": _ = PasteAsync(); break;
+                case "SelectAll": SelectAll(); break;
+                case "Find": OpenFind(false); break;
+                case "Replace": OpenFind(true); break;
+                case "ToggleReplaceRow":
+                    if (Find.IsOpen) Find.ReplaceOpen = !Find.ReplaceOpen;
+                    else OpenFind(true);
                     break;
-                case "Copy": ShowToast("复制 — 原型模式"); break;
-                case "Paste": InsertObject("Text"); break;
-                case "SelectAll": ShowToast("全选 — 原型模式"); break;
-                case "Find": OpenFindCommand.Execute(null); break;
-                case "Replace": ShowToast("查找和替换 — 原型模式"); break;
+                case "FindNext": Find.NextCommand.Execute(null); break;
+                case "FindPrev": Find.PrevCommand.Execute(null); break;
 
                 case "InsertText": InsertObject("Text"); break;
                 case "InsertFormula": InsertFormulaFromDialog(); break;
                 case "InsertImage": InsertObject("Image"); break;
+                case "BioCartoon": OpenBioCartoon(); break;
+                case "PythonPlot": OpenPythonPlot(); break;
+                case "ExtractImages": _ = ExtractImages(); break;
                 case "InsertTable": InsertObject("Table"); break;
                 case "InsertShape": InsertObject("Rectangle"); break;
                 case "InsertPen": ShowToast("绘制 ▸ 画笔 — 原型模式"); break;
@@ -1052,22 +2519,34 @@ namespace ManimbleWin.ViewModels
                 case "Bold": ToggleFormat("Bold"); break;
                 case "Italic": ToggleFormat("Italic"); break;
                 case "Underline": ToggleFormat("Underline"); break;
-                case "Theme": ShowToast("格式 ▸ 主题 — 请在工具栏选择色块"); break;
-                case "AlignLeft": ShowToast("左对齐"); break;
-                case "AlignCenter": ShowToast("居中对齐"); break;
-                case "AlignRight": ShowToast("右对齐"); break;
+                case "Theme": OpenThemePicker(); break;
+                case "SlideSetup": OpenSlideSetup(); break;
+                case "AlignLeft": _ = AlignSelectionAsync("left"); break;
+                case "AlignCenter": _ = AlignSelectionAsync("center"); break;
+                case "AlignRight": _ = AlignSelectionAsync("right"); break;
+                case "AlignTop": _ = AlignSelectionAsync("top"); break;
+                case "AlignMiddle": _ = AlignSelectionAsync("middle"); break;
+                case "AlignBottom": _ = AlignSelectionAsync("bottom"); break;
+                case "DistributeH": _ = DistributeSelectionAsync(true); break;
+                case "DistributeV": _ = DistributeSelectionAsync(false); break;
 
-                case "Front": ShowToast("置于顶层"); break;
-                case "Group": ShowToast("组合 — 原型模式"); break;
-                case "Ungroup": ShowToast("取消组合 — 原型模式"); break;
+                case "Front": _ = ChangeOrderAsync("front"); break;
+                case "Forward": _ = ChangeOrderAsync("forward"); break;
+                case "Backward": _ = ChangeOrderAsync("backward"); break;
+                case "Back": _ = ChangeOrderAsync("back"); break;
+                case "Group": _ = GroupSelectionAsync(false); break;
+                case "Ungroup": _ = GroupSelectionAsync(true); break;
 
                 case "GridLines": ShowGrid = !ShowGrid; break;
                 case "Ruler": ShowRuler = !ShowRuler; break;
                 case "Snap": SnapToObjects = !SnapToObjects; break;
                 case "ShowObjects": ShowObjects = !ShowObjects; break;
                 case "SpeakerNotes": ShowDrawer(0); break;
-                case "DarkModeApp": IsDarkMode = !IsDarkMode; break;
-                case "InvertColors": ShowToast("反色 — 原型模式"); break;
+                case "DarkModeApp": IsDarkMode = !IsDarkMode; ShowToast(IsDarkMode ? "界面已切换为深色" : "界面已切换为浅色"); break;
+                // 演示文稿深色 / 反色：改的是 deck 源码里的颜色，与应用界面无关
+                case "DeckDark": _ = ApplyDeckColorsAsync("dark"); break;
+                case "DeckInvert": _ = ApplyDeckColorsAsync("invert"); break;
+                case "InvertColors": _ = ApplyDeckColorsAsync("invert"); break;   // 旧参数名，保留兼容
                 case "ShowTerminal": ShowTerminalPanel(); break;
                 case "NewTerminal":
                     ShowTerminalPanel();
@@ -1080,7 +2559,7 @@ namespace ManimbleWin.ViewModels
 
                 case "PlayFromBeginning": OpenPreview(0); break;
                 case "PlayFromCurrent": OpenPreview(); break;
-                case "Presenter": OpenPreview(); break;
+                case "Presenter": OpenPresenter(); break;
                 case "PreviewAnimation": OpenPreviewCurrentOnly(); break;
 
                 case "Docs": ShowToast("文档：pachterlab.github.io/Manimble"); break;
@@ -1214,6 +2693,14 @@ namespace ManimbleWin.ViewModels
         {
             var vm = new PreviewViewModel(this, -1) { OnlyCurrent = true };
             var win = new Views.PreviewWindow(vm) { Owner = Application.Current?.MainWindow };
+            win.Show();
+        }
+
+        /// <summary>打开演讲者视图：当前页/下一页静帧 + 备注 + 计时器（静帧来自 deck_pages）。</summary>
+        private void OpenPresenter()
+        {
+            var vm = new PresenterViewModel(this);
+            var win = new Views.PresenterWindow(vm) { Owner = Application.Current?.MainWindow };
             win.Show();
         }
 

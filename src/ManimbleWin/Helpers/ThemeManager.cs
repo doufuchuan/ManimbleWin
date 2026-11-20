@@ -49,6 +49,10 @@ namespace ManimbleWin.Helpers
             Set(r, "CodeBackgroundBrush", dark ? CodeDark : CodeLight);
             Set(r, "CanvasTopBrush", dark ? CanvasTopDark : CanvasTopLight);
             Set(r, "CanvasBottomBrush", dark ? CanvasBottomDark : CanvasBottomLight);
+            // 画布底色渐变的两个停靠点绑的是这两条 Color 资源：画刷实例会被整体替换，按实例拿 Color 的
+            // 绑定永远停在旧值；Color 是值类型、不会被冻结，替换值是最稳的做法。
+            SetColor(r, "CanvasTopColor", dark ? CanvasTopDark : CanvasTopLight);
+            SetColor(r, "CanvasBottomColor", dark ? CanvasBottomDark : CanvasBottomLight);
             Set(r, "TextPrimaryBrush", dark ? InkDark : InkLight);
             Set(r, "ChromeBackgroundBrush", dark ? ChromeDark : ChromeLight);
             Set(r, "SeparatorBrush", dark ? SepDark : SepLight);
@@ -64,10 +68,30 @@ namespace ManimbleWin.Helpers
 
         private static void Set(ResourceDictionary dict, string key, Color color)
         {
-            if (dict[key] is SolidColorBrush brush)
+            if (!(dict[key] is SolidColorBrush brush)) return;
+            if (brush.Color == color) return;
+
+            // 资源里的画刷可能已被 WPF 冻结（插入 Application.Resources / BAML 加载时都会自动 Freeze）：
+            // 对冻结实例赋 Color 会抛 InvalidOperationException（历史 crash.log 就有这一条）。冻结时改成
+            // 替换实例——接在可视树里的 DynamicResource 引用会重新解析；会收不到通知的情形见 SetColor。
+            if (brush.IsFrozen)
             {
-                if (brush.Color != color) brush.Color = color;
+                dict[key] = new SolidColorBrush(color);
+                return;
             }
+            brush.Color = color;
+        }
+
+        /// <summary>
+        /// 写入一条 <see cref="Color"/> 类型的资源。Color 是 struct，不属于 Freezable，WPF 无法冻结它，
+        /// 这里可以直接替换值。<c>DynamicResource</c> 引用会重新取值——但只对"已接进可视树、有窗口祖先"
+        /// 的元素成立（WPF 的资源失效通知是从窗口往下广播的；资源字典里的 Freezable 与从未挂窗口的
+        /// 分离态控件都收不到，实测如此）。
+        /// </summary>
+        private static void SetColor(ResourceDictionary dict, string key, Color color)
+        {
+            if (dict[key] is Color existing && existing == color) return;
+            dict[key] = color;
         }
     }
 }

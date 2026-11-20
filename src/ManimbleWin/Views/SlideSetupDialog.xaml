@@ -1,0 +1,144 @@
+<Window x:Class="ManimbleWin.Views.SlideSetupDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="背景与页码" Height="620" Width="470"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="{DynamicResource ChromeBackgroundBrush}">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="背景与页码" FontSize="16" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+        <TextBlock Text="{Binding Status}" FontSize="11"
+                   Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- 背景 -->
+                <TextBlock Text="幻灯片背景" Style="{StaticResource PanelHeader}" Margin="0,0,0,8"/>
+                <TextBlock Text="当前" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+                <TextBlock Text="{Binding BgCurrent}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="11"
+                           Margin="0,2,0,10" TextWrapping="Wrap"/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <RadioButton Content="纯色" IsChecked="{Binding BgMode, Converter={StaticResource StrEq}, ConverterParameter=color}"
+                                 Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,14,0"/>
+                    <RadioButton Content="图片" IsChecked="{Binding BgMode, Converter={StaticResource StrEq}, ConverterParameter=image}"
+                                 Foreground="{DynamicResource TextPrimaryBrush}"/>
+                </StackPanel>
+
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="颜色" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"
+                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox Text="{Binding BgColor, UpdateSourceTrigger=PropertyChanged}" Grid.Column="1"
+                             Style="{StaticResource FieldInput}" ToolTip="#RRGGBB"/>
+                    <Border Grid.Column="2" Width="24" Height="22" Margin="8,0,0,0" CornerRadius="3"
+                            BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="1">
+                        <Border.Background>
+                            <Binding Path="BgColor" Converter="{StaticResource StrBrush}"/>
+                        </Border.Background>
+                    </Border>
+                </Grid>
+
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="图片" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"
+                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="{Binding BgImageLabel}" Grid.Column="1" Foreground="{DynamicResource TextPrimaryBrush}"
+                               FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    <Button Content="选择…" Grid.Column="2" Command="{Binding PickImageCommand}"
+                            Style="{StaticResource ToolTextButton}" Margin="8,0,0,0" Padding="8,2"/>
+                </Grid>
+
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="透明度" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"
+                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <Slider Value="{Binding Transparency}" Minimum="0" Maximum="1" SmallChange="0.05" Grid.Column="1"/>
+                    <TextBlock Text="{Binding Transparency, StringFormat={}{0:P0}}" Grid.Column="2"
+                               Foreground="{DynamicResource TextPrimaryBrush}" FontSize="11" Margin="8,0,0,0"/>
+                </Grid>
+
+                <CheckBox Content="应用到所有幻灯片" IsChecked="{Binding BgAll}"
+                          Foreground="{DynamicResource TextPrimaryBrush}" FontSize="11" Margin="0,0,0,8"/>
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="应用背景" Command="{Binding ApplyBackgroundCommand}"
+                            Style="{StaticResource ToolTextButton}" Padding="10,4"/>
+                    <Button Content="清除背景" Command="{Binding ResetBackgroundCommand}"
+                            Style="{StaticResource ToolTextButton}" Padding="10,4" Margin="8,0,0,0"/>
+                </StackPanel>
+
+                <Separator Margin="0,18,0,16"/>
+
+                <!-- 页码 -->
+                <TextBlock Text="页码" Style="{StaticResource PanelHeader}" Margin="0,0,0,8"/>
+                <TextBlock Text="状态" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+                <TextBlock Text="{Binding PageState}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="11"
+                           Margin="0,2,0,10"/>
+
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="位置" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"
+                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding PagePositions}" SelectedItem="{Binding PagePos}"
+                              Height="24" FontSize="11"/>
+                </Grid>
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="80"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="80"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="起始" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"
+                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox Text="{Binding PageStart}" Grid.Column="1" Style="{StaticResource FieldInput}"/>
+                    <TextBlock Text="字号" Grid.Column="2" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"
+                               VerticalAlignment="Center" Margin="12,0,8,0"/>
+                    <TextBox Text="{Binding PageSize}" Grid.Column="3" Style="{StaticResource FieldInput}"/>
+                </Grid>
+                <CheckBox Content="跳过首页" IsChecked="{Binding PageSkip}" Foreground="{DynamicResource TextPrimaryBrush}"
+                          FontSize="11" Margin="0,0,0,4"/>
+                <CheckBox Content="显示总数（3 / 10）" IsChecked="{Binding PageTotal}" Foreground="{DynamicResource TextPrimaryBrush}"
+                          FontSize="11" Margin="0,0,0,4"/>
+                <CheckBox Content="小字样式" IsChecked="{Binding PageSub}" Foreground="{DynamicResource TextPrimaryBrush}"
+                          FontSize="11" Margin="0,0,0,10"/>
+
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="写入页码" Command="{Binding ApplyPagesCommand}"
+                            Style="{StaticResource ToolTextButton}" Padding="10,4"/>
+                    <Button Content="移除页码" Command="{Binding RemovePagesCommand}"
+                            Style="{StaticResource ToolTextButton}" Padding="10,4" Margin="8,0,0,0"/>
+                </StackPanel>
+                <Button Content="把本页页码样式应用到所有页" Command="{Binding SpreadPagesCommand}"
+                        Style="{StaticResource ToolTextButton}" Padding="10,4" Margin="0,8,0,0" HorizontalAlignment="Left"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <TextBlock Grid.Row="2" Text="每次写入都会更新 deck 源码，按 Ctrl+Z 可一步撤销。"
+                   Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10.5" Margin="0,12,0,8"/>
+        <Button Grid.Row="3" Content="关闭" IsCancel="True" HorizontalAlignment="Right"
+                Style="{StaticResource ToolTextButton}" Padding="18,5"/>
+    </Grid>
+</Window>
