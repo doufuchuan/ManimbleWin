@@ -55,6 +55,10 @@ namespace ManimbleWin.ViewModels
         public event Action<PreviewFrame, bool, bool> FrameChanged;
         /// <summary>真实渲染片段就绪。</summary>
         public event Action<List<AnimationClip>> ClipsReady;
+        /// <summary>进度条拖动：参数是 0..1 的片段位置（真实 mp4 模式）。</summary>
+        public event Action<double> SeekRequested;
+        /// <summary>真实片段模式下的切换：0 = 重新开始，±1 = 上/下一段。</summary>
+        public event Action<int> ClipNavigate;
 
         public PreviewViewModel(MainViewModel main, int startIndex = -1)
         {
@@ -62,10 +66,19 @@ namespace ManimbleWin.ViewModels
             BuildFrames(startIndex);
 
             PlayPauseCommand = new RelayCommand(_ => Playing = !Playing);
-            NextCommand = new RelayCommand(_ => { Playing = false; Step(+1); });
-            PrevCommand = new RelayCommand(_ => { Playing = false; Step(-1); });
+            NextCommand = new RelayCommand(_ =>
+            {
+                if (HasRealClips) { ClipNavigate?.Invoke(+1); return; }
+                Playing = false; Step(+1);
+            });
+            PrevCommand = new RelayCommand(_ =>
+            {
+                if (HasRealClips) { ClipNavigate?.Invoke(-1); return; }
+                Playing = false; Step(-1);
+            });
             RestartCommand = new RelayCommand(_ =>
             {
+                if (HasRealClips) { ClipNavigate?.Invoke(0); return; }
                 _elapsedMs = 0;
                 Index = 0;
                 Playing = true;
@@ -99,15 +112,53 @@ namespace ManimbleWin.ViewModels
         }
 
         public PreviewFrame Current => Frames.Count == 0 ? null : Frames[Math.Min(_index, Frames.Count - 1)];
-        public string PositionText => Frames.Count == 0 ? "0 / 0" : $"{_index + 1} / {Frames.Count}";
-        public string SlideText => Current == null ? "" : $"{Current.SlideName} · 构建 {Current.BuildIndex + 1}";
+
+        // 真实 mp4 模式：进度按当前片段的时间走，而不是按构建帧的序号。
+        private double _mediaProgress;
+        private string _timeText = "0:00 / 0:00";
+        private string _clipLabel = "";
+
+        public string PositionText => HasRealClips
+            ? _timeText
+            : (Frames.Count == 0 ? "0 / 0" : $"{_index + 1} / {Frames.Count}");
+        public string SlideText => HasRealClips
+            ? (string.IsNullOrEmpty(_clipLabel) ? "真实渲染片段" : _clipLabel)
+            : (Current == null ? "" : $"{Current.SlideName} · 构建 {Current.BuildIndex + 1}");
+
+        /// <summary>视图定时把 MediaElement 的 Position/NaturalDuration 回报到这里。</summary>
+        public void UpdateMediaTime(TimeSpan position, TimeSpan duration, string label = null)
+        {
+            _mediaProgress = duration.TotalSeconds > 0
+                ? Math.Max(0, Math.Min(100, position.TotalSeconds / duration.TotalSeconds * 100))
+                : 0;
+            _timeText = FormatTime(position) + " / " + FormatTime(duration);
+            if (label != null) _clipLabel = label;
+            RaisePropertyChanged(nameof(MediaProgress));
+            RaisePropertyChanged(nameof(PositionText));
+            RaisePropertyChanged(nameof(SlideText));
+            RaiseProgress();
+        }
+
+        private static string FormatTime(TimeSpan t)
+            => t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}" : $"{t.Minutes}:{t.Seconds:00}";
 
         private bool _seeking;
+        public double MediaProgress => _mediaProgress;
+
         public double Progress
         {
-            get => Frames.Count <= 1 ? 0 : (double)_index / (Frames.Count - 1) * 100;
+            get => HasRealClips ? _mediaProgress : (Frames.Count <= 1 ? 0 : (double)_index / (Frames.Count - 1) * 100);
             set
             {
+                if (HasRealClips)
+                {
+                    double fraction = Math.Max(0, Math.Min(100, value)) / 100.0;
+                    _mediaProgress = fraction * 100;
+                    RaisePropertyChanged(nameof(MediaProgress));
+                    RaisePropertyChanged(nameof(Progress));
+                    SeekRequested?.Invoke(fraction);
+                    return;
+                }
                 if (Frames.Count <= 1 || _seeking) return;
                 _seeking = true;
                 Index = (int)Math.Round(Math.Max(0, Math.Min(100, value)) / 100.0 * (Frames.Count - 1));
@@ -292,6 +343,9 @@ namespace ManimbleWin.ViewModels
                 {
                     _clips = clips;
                     RaisePropertyChanged(nameof(HasRealClips));
+                    RaisePropertyChanged(nameof(PositionText));
+                    RaisePropertyChanged(nameof(SlideText));
+                    RaiseProgress();
                     Status = $"已生成 {clips.Count} 段真实渲染片段，正在播放。";
                     ClipsReady?.Invoke(clips);
                 }

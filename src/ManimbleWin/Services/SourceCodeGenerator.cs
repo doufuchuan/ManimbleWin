@@ -219,10 +219,9 @@ namespace ManimbleWin.Services
                     {
                         // 行里原本可能带 r"…" / f"…" 前缀，前缀要一起替换掉，
                         // 否则会拼出 rr"…" 这种非法字面量。
-                        int qStart = q;
-                        if (q - 1 > open && "rRuUbBfF".IndexOf(line[q - 1]) >= 0 &&
-                            (q - 2 <= open || !(char.IsLetterOrDigit(line[q - 2]) || line[q - 2] == '_')))
-                            qStart = q - 1;
+                        // 一次吃掉整个前缀（r / f / rf / fr，包含历史遗留的 rr…），
+                        // 只吃一个字符会把剩下的前缀留在 RawString 前面，反复编辑就叠成 rrr…"。
+                        int qStart = LiteralPrefixStart(line, q, open);
 
                         string tex = NormalizeTex(string.IsNullOrEmpty(o.Value) ? o.DisplayText : o.Value);
                         rewritten = rewritten.Substring(0, qStart) + RawString(tex) + rewritten.Substring(qEnd + 1);
@@ -330,13 +329,16 @@ namespace ManimbleWin.Services
         private static string NormalizeTex(string tex)
         {
             string t = (tex ?? "").Trim();
-            if (t.Length == 0) return t;
-            var m = System.Text.RegularExpressions.Regex.Match(
-                t, "^(?:[rR])?(?:\"([\\s\\S]*)\"|'([\\s\\S]*)')$");
-            if (m.Success)
+            // 源码回读可能带回多层外壳（r"x^2"、rr"x^2"、rf"x^2"…）。逐层剥掉，
+            // 直到不再匹配；否则 RawString 会再套一层，前缀越编越多。
+            for (int i = 0; i < 8 && t.Length > 0; i++)
             {
+                var m = System.Text.RegularExpressions.Regex.Match(
+                    t, "^(?:[rRbBuUfF]{0,4})(?:\"([\\s\\S]*)\"|'([\\s\\S]*)')$");
+                if (!m.Success) break;
                 string inner = m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value;
-                if (inner.Length > 0) return inner;
+                if (inner.Length == 0) break;
+                t = inner.Trim();
             }
             return t;
         }
@@ -391,16 +393,10 @@ namespace ManimbleWin.Services
             }
             if (q < 0) { note = "这一行没有可以替换的文本"; return false; }
 
-            // 前缀（r / f / u / b）要原样保留：切掉 r 会让反斜杠被再转义一遍，
-            // 切掉 f 会让原来的 {} 从插值退化成字面量（或反过来）。
-            int quoteStart = q;
-            char prefix = '\0';
-            if (q - 1 >= 0 && "rRuUbBfF".IndexOf(line[q - 1]) >= 0 &&
-                (q - 2 < 0 || !(char.IsLetterOrDigit(line[q - 2]) || line[q - 2] == '_')))
-            {
-                prefix = line[q - 1];
-                quoteStart = q - 1;
-            }
+            // 一次吃掉整个前缀（r / f / rf / fr，以及历史遗留的 rr…），再把写回文本
+            // 重新套上一个（且只有一个）规范化前缀，杜绝 rr"…" / rrf"…" 叠加。
+            int quoteStart = LiteralPrefixStart(line, q, -1);
+            string prefix = line.Substring(quoteStart, q - quoteStart);
 
             char quote = line[q];
             int qEnd = -1;
@@ -418,24 +414,45 @@ namespace ManimbleWin.Services
             return true;
         }
 
+        /// <summary>从引号往回吃掉整个合法前缀串（含历史遗留的重复前缀），返回字面量起始位置。</summary>
+        private static int LiteralPrefixStart(string text, int quoteIndex, int lowerBound)
+        {
+            int start = quoteIndex;
+            while (start > lowerBound && "rRbBuUfF".IndexOf(text[start - 1]) >= 0) start--;
+            if (start == quoteIndex) return quoteIndex;
+            // 前缀左边必须是边界，否则是某个标识符的结尾（例如 my_r"…"）
+            if (start - 1 >= lowerBound && (char.IsLetterOrDigit(text[start - 1]) || text[start - 1] == '_'))
+                return quoteIndex;
+            return start;
+        }
+
+        /// <summary>把任意（可能重复的）前缀串规范化为恰好一个合法前缀。</summary>
+        private static string NormalizePrefix(string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix)) return "";
+            string p = prefix.ToLowerInvariant();
+            if (p.IndexOf('r') >= 0) return "r";
+            if (p.IndexOf('f') >= 0) return "f";
+            if (p.IndexOf('b') >= 0) return "b";
+            return "u";
+        }
+
         /// <summary>
-        /// 按目标字面量类型转义一段普通文本，返回值包含前缀与引号。
+        /// 按目标字面量类型转义一段普通文本，返回值包含恰好一个规范化前缀与引号。
         /// raw（r"…"）：反斜杠就是字面量，不能再转义；f-string（f"…"）：花括号是插值，字面花括号要写成 {{ }}。
         /// </summary>
-        private static string EscapeLiteral(string s, char quote, char prefix = '\0')
+        private static string EscapeLiteral(string s, char quote, string prefix = "")
         {
             string t = (s ?? "").Replace("\r", "");
-            bool isRaw = prefix == 'r' || prefix == 'R';
+            string pre = NormalizePrefix(prefix);   // 不允许 rr / rf 这类叠加前缀漏出
+            bool isRaw = pre == "r";
 
-            if (isRaw && t.IndexOf(quote) >= 0)
+            if (isRaw && (t.IndexOf(quote) >= 0 || t.EndsWith("\\", StringComparison.Ordinal)))
             {
-                // raw 字符串里写不出「引号本身」而不带反斜杠，只能退回普通字符串（此时反斜杠要转义）
+                // raw 字符串里写不出「引号本身」/ 结尾反斜杠，退回普通字符串（反斜杠要转义）
                 isRaw = false;
-                prefix = '\0';
+                pre = "";
             }
-
-            // 前缀要显式转成字符串：char + char 是整数加法（'r' + '"' == 148），会写出非法代码
-            string pre = prefix == '\0' ? "" : prefix.ToString();
 
             if (isRaw)
             {
@@ -447,8 +464,7 @@ namespace ManimbleWin.Services
             t = t.Replace("\\", "\\\\");
             if (quote == '\'') t = t.Replace("'", "\\'");
             else t = t.Replace("\"", "\\\"");
-            if (prefix == 'f' || prefix == 'F')
-                t = t.Replace("{", "{{").Replace("}", "}}");
+            if (pre == "f") t = t.Replace("{", "{{").Replace("}", "}}");
             t = t.Replace("\n", "\\n");
             return pre + quote + t + quote;
         }

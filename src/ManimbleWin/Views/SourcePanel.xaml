@@ -33,6 +33,11 @@
                         Command="{Binding RevertSourceEditCommand}" Height="24" Padding="8,2" Margin="4,0,0,0">
                     <TextBlock Text="还原" FontSize="11"/>
                 </Button>
+                <Button Style="{StaticResource ToolTextButton}" ToolTip="恢复源码冲突时暂存的草稿"
+                        Command="{Binding RestoreSourceDraftCommand}" IsEnabled="{Binding HasSourceDraftBackup}"
+                        Height="24" Padding="8,2" Margin="4,0,0,0">
+                    <TextBlock Text="草稿" FontSize="11"/>
+                </Button>
                 <TextBlock Text="{Binding SourceEditStatus}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10"
                            VerticalAlignment="Center" Margin="10,0,0,0"/>
             </StackPanel>

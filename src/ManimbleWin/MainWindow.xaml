@@ -420,8 +420,6 @@
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="{Binding DrawerHeight, Mode=TwoWay}"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="{Binding TerminalHeight, Mode=TwoWay}"/>
                 </Grid.RowDefinitions>
                 <views:CanvasView Grid.Row="0"/>
 
@@ -431,94 +429,7 @@
                               Visibility="{Binding DrawerVisible, Converter={StaticResource BoolToVis}}"/>
                 <views:DrawerPanel Grid.Row="2" Visibility="{Binding DrawerVisible, Converter={StaticResource BoolToVis}}"/>
 
-                <!-- 独立终端面板：停靠在中栏底部（画布自动让位，不再盖住 PPT） -->
-                <GridSplitter Grid.Row="3" Height="4" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="Transparent"
-                              ResizeBehavior="PreviousAndNext" ResizeDirection="Rows"
-                              Visibility="{Binding TerminalVisible, Converter={StaticResource BoolToVis}}"/>
-                <Border Grid.Row="4"
-                        Background="{DynamicResource ChromeBackgroundBrush}"
-                        BorderThickness="0,1,0,0" BorderBrush="{DynamicResource SeparatorBrush}"
-                        Visibility="{Binding TerminalVisible, Converter={StaticResource BoolToVis}}">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
-                        <Border Grid.Row="0" Padding="8,4" Background="{DynamicResource BarBackgroundBrush}"
-                                BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}">
-                            <Grid>
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <TextBlock Text="终端" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,8,0"/>
-
-                                    <!-- 终端标签栏：一个标签 = 一个独立会话（各自的工作目录 / 输出 / 历史 / 进程） -->
-                                    <ItemsControl ItemsSource="{Binding Terminal.Sessions}" VerticalAlignment="Center">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <StackPanel Orientation="Horizontal"/>
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <RadioButton Style="{StaticResource DrawerTabButton}" FontSize="10.5"
-                                                             Padding="8,5,6,5"
-                                                             IsChecked="{Binding IsActive, Mode=OneWay}"
-                                                             Command="{Binding DataContext.Terminal.SelectSessionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                             CommandParameter="{Binding}"
-                                                             ToolTip="{Binding CurrentDirectory}">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Text="{Binding TabTitle}" FontFamily="Consolas" VerticalAlignment="Center"/>
-                                                        <Button Style="{StaticResource TabCloseButton}" Margin="5,0,0,0"
-                                                                Command="{Binding DataContext.Terminal.CloseSessionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                                CommandParameter="{Binding}"
-                                                                ToolTip="关闭这个终端（其他标签不受影响）"/>
-                                                    </StackPanel>
-                                                </RadioButton>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-
-                                    <!-- 新建标签：点一下选 CMD / PowerShell -->
-                                    <Button x:Name="NewTabButton" Style="{StaticResource ToolIconButton}" Width="22" Height="22" Margin="2,0,0,0"
-                                            FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"
-                                            Content="+" ToolTip="新建终端（可选择 CMD 或 PowerShell）"
-                                            Click="NewTabButton_Click">
-                                        <Button.ContextMenu>
-                                            <ContextMenu>
-                                                <MenuItem Header="CMD"
-                                                          Command="{Binding PlacementTarget.DataContext.Terminal.NewSessionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                          CommandParameter="cmd"/>
-                                                <MenuItem Header="PowerShell"
-                                                          Command="{Binding PlacementTarget.DataContext.Terminal.NewSessionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                          CommandParameter="powershell"/>
-                                            </ContextMenu>
-                                        </Button.ContextMenu>
-                                    </Button>
-
-                                    <TextBlock Text="{Binding Terminal.Active.CurrentDirectory}" FontFamily="Consolas" FontSize="10.5"
-                                               Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"
-                                               Margin="10,0,0,0" MaxWidth="360" TextTrimming="CharacterEllipsis"
-                                               ToolTip="{Binding Terminal.Active.CurrentDirectory}"/>
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Terminal.Active.StatusText}" FontSize="10" VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,8,0"/>
-                                    <Button Content="停止" Style="{StaticResource ToolTextButton}" FontSize="10" Padding="8,2" Height="21"
-                                            Command="{Binding Terminal.CancelCommand}" ToolTip="中断正在运行的命令（Ctrl+C）"/>
-                                    <Button Content="外部窗口" Style="{StaticResource ToolTextButton}" FontSize="10" Padding="8,2" Height="21" Margin="4,0,0,0"
-                                            Command="{Binding Terminal.OpenExternalCommand}" ToolTip="用系统控制台打开 cmd / PowerShell（可运行交互式程序）"/>
-                                    <Button Content="清屏" Style="{StaticResource ToolTextButton}" FontSize="10" Padding="8,2" Height="21" Margin="4,0,0,0"
-                                            Command="{Binding Terminal.ClearCommand}" ToolTip="清空输出（Ctrl+L）"/>
-                                    <Button Style="{StaticResource ToolIconButton}" Width="26" Height="22" Margin="6,0,0,0"
-                                            ToolTip="关闭终端（Esc）" Command="{Binding MenuCommand}" CommandParameter="CloseTerminal">
-                                        <Path Data="{StaticResource Icon.Close}" Stroke="{DynamicResource TextSecondaryBrush}"
-                                              StrokeThickness="1.5" Stretch="Uniform" Width="10" Height="10"/>
-                                    </Button>
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                        <views:TerminalView Grid.Row="1"/>
-                    </Grid>
-                </Border>
+                <!-- 终端只在抽屉的「终端 1」标签里出现，不再单独占用中栏底部一整行 -->
             </Grid>
 
             <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext"

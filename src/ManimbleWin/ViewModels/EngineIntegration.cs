@@ -258,15 +258,28 @@ namespace ManimbleWin.ViewModels
         private void ApplyObjects(Slide slide, JsonElement objects, List<JsonElement> stops)
         {
             if (objects.ValueKind != JsonValueKind.Object) return;
-            // 每个 build 的可见对象列表
+            // 每个 build 的可见对象列表；visible 项形如 [oid, x1, y1, x2, y2]（1280×720 设计坐标）。
+            // 必须把这块几何一起带过来：否则真实渲染后 CanvasObject 都停在 (0,0)、尺寸为 0，
+            // 对象模板的点击框根本点不到，用户就会看到「渲染完不能选中修改」。
             var visibleSets = new List<HashSet<int>>();
+            var bounds = new Dictionary<int, (double x, double y, double w, double h)>();
             foreach (var st in stops)
             {
                 var set = new HashSet<int>();
                 if (st.TryGetProperty("visible", out var vis) && vis.ValueKind == JsonValueKind.Array)
                     foreach (var v in vis.EnumerateArray())
-                        if (v.ValueKind == JsonValueKind.Array && v.GetArrayLength() > 0 && v[0].TryGetInt32(out int oid))
-                            set.Add(oid);
+                    {
+                        if (v.ValueKind != JsonValueKind.Array || v.GetArrayLength() == 0 ||
+                            !v[0].TryGetInt32(out int oid)) continue;
+                        set.Add(oid);
+                        if (v.GetArrayLength() < 5 || bounds.ContainsKey(oid)) continue;
+                        double x1 = v[1].ValueKind == JsonValueKind.Number ? v[1].GetDouble() : 0;
+                        double y1 = v[2].ValueKind == JsonValueKind.Number ? v[2].GetDouble() : 0;
+                        double x2 = v[3].ValueKind == JsonValueKind.Number ? v[3].GetDouble() : x1 + 120;
+                        double y2 = v[4].ValueKind == JsonValueKind.Number ? v[4].GetDouble() : y1 + 40;
+                        bounds[oid] = (Math.Min(x1, x2), Math.Min(y1, y2),
+                                       Math.Max(16, Math.Abs(x2 - x1)), Math.Max(12, Math.Abs(y2 - y1)));
+                    }
                 visibleSets.Add(set);
             }
             if (visibleSets.Count == 0) visibleSets.Add(new HashSet<int>());
@@ -295,6 +308,21 @@ namespace ManimbleWin.ViewModels
                             SourceLine = ParseLine(GetStr(o, "loc")),
                             IsSelected = false
                         };
+                        // 用引擎给的包围盒定位点击框；没有几何信息的对象给个居中的最小可点区域。
+                        if (bounds.TryGetValue(oid, out var box))
+                        {
+                            co.X = box.x;
+                            co.Y = box.y;
+                            co.Width = box.w;
+                            co.Height = box.h;
+                        }
+                        else
+                        {
+                            co.X = 580;
+                            co.Y = 340;
+                            co.Width = 120;
+                            co.Height = 40;
+                        }
                         if (co.Kind == ObjectKind.Tex)
                         {
                             // 稍后异步请求 sprite 真实渲染
@@ -365,7 +393,7 @@ namespace ManimbleWin.ViewModels
                 if (!ok)
                 {
                     string err = GetStr(r, "error") ?? "未知错误";
-                    Say("源码写回被拒绝：" + err);
+                    Say("源码写回被拒绝：" + err + "（本地源码已保留，可在代码窗格重新应用）");
                     return false;
                 }
                 Say($"源码已写回并重新渲染：{slide.Name}");
@@ -376,6 +404,93 @@ namespace ManimbleWin.ViewModels
             {
                 Say("源码写回失败：" + ex.Message);
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// 源码面板专用写回：expected 实时从引擎读取，与 edit_source 的校验基准完全一致。
+        /// 真正的并发冲突给用户可操作的三选一（覆盖 / 加载新版本并暂存草稿 / 取消），
+        /// 不再让用户手动复制草稿后重新加载。
+        /// </summary>
+        public async Task<bool> ApplyTextEditFromEditor(Slide slide, string draft)
+        {
+            if (!IsConnected || slide == null) return false;
+
+            if (EngineScenes.Count > 0 && !EngineScenes.Contains(slide.Name))
+            {
+                Say($"「{slide.Name}」不在引擎当前 deck 中，改动已保存在应用内（未写回文件）。");
+                return true;
+            }
+
+            string expected = await GetSourceSnapshot(slide);
+            var first = await TryEditSource(slide, expected, draft);
+            if (first.ok) return true;
+
+            string err = first.error ?? "";
+            if (err.IndexOf("Source changed", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                Say("源码写回被拒绝：" + err);
+                return false;
+            }
+
+            var answer = MessageBox.Show(
+                "源码在编辑期间被后台写回改变。你的草稿没有丢失。\n\n" +
+                "是(Y)：按最新快照重试，把草稿写回（会覆盖后台改动）\n" +
+                "否(N)：加载引擎最新版本，草稿暂存到「草稿」按钮\n" +
+                "取消：保持现状，稍后再处理",
+                "源码写回冲突", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+
+            if (answer == MessageBoxResult.Yes)
+            {
+                // 用户明确选择覆盖：重新取快照，尽量缩短取快照到写回之间的窗口
+                string fresh = await GetSourceSnapshot(slide);
+                var retry = await TryEditSource(slide, fresh, draft);
+                if (retry.ok) return true;
+                Say("源码写回再次被拒绝：" + (retry.error ?? "未知错误"));
+                return false;
+            }
+            if (answer == MessageBoxResult.No)
+            {
+                // 冲突说明源码已变，界面要加载的是「此刻」的引擎版本，不是第一次尝试时的快照。
+                string latest = await GetSourceSnapshot(slide);
+                _vm.LoadSourceFromEngine(slide, latest, draft);
+                return false;
+            }
+
+            Say("源码写回已取消，草稿保留在编辑器中。");
+            return false;
+        }
+
+        /// <summary>取引擎当前源码原文；取不到时退回本地副本（本地模式下仍可工作）。</summary>
+        private async Task<string> GetSourceSnapshot(Slide slide)
+        {
+            try
+            {
+                var r = await _engine.Source(slide.Name);
+                if (r.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String)
+                    return t.GetString() ?? slide.Source ?? "";
+            }
+            catch (Exception ex)
+            {
+                Say("读取源码快照失败，改用本地副本：" + ex.Message);
+            }
+            return slide.Source ?? "";
+        }
+
+        private async Task<(bool ok, string error)> TryEditSource(Slide slide, string expected, string draft)
+        {
+            try
+            {
+                var r = await _engine.EditSource(slide.Name, slide.File, expected, draft);
+                bool ok = !r.TryGetProperty("ok", out var okEl) || okEl.ValueKind != JsonValueKind.False;
+                if (!ok) return (false, GetStr(r, "error") ?? "未知错误");
+                Say($"源码已写回并重新渲染：{slide.Name}");
+                await LoadSceneInto(slide);
+                return (true, null);
+            }
+            catch (EngineException ex)
+            {
+                return (false, ex.Message);
             }
         }
 

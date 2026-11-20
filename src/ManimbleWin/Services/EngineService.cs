@@ -199,6 +199,10 @@ namespace ManimbleWin.Services
             return Request("sprite", args, 120000);
         }
 
+        /// <summary>读取某个场景的精确源码快照（edit_source 冲突校验用的同一份文本）。</summary>
+        public Task<JsonElement> Source(string scene)
+            => Request("source", new { scene }, 20000);
+
         /// <summary>把一段 Python 源码写回引擎工作副本并触发重渲染。expected 为编辑开始时的原文（用于冲突检测）。</summary>
         public Task<JsonElement> EditSource(string scene, string file, string expected, string text)
             => Request("edit_source", new { scene, file, expected, text }, 180000);

@@ -68,6 +68,9 @@ def main():
         "settle": lambda a: (need()._settle(), {"ok": True})[1],
         "clear_history": lambda a: need().clear_history(),
         "edit_source": lambda a: need().edit_source(a),
+        # 源码编辑开始时取的精确快照：与 edit_source 的 expected 校验完全一致，
+        # 避免客户端自己按行拼出来的文本（换行符 / 尾部注释不同）被误判为冲突。
+        "source": lambda a: need().api_source(a["scene"]),
         "undo": lambda a: need().undo(),
         "redo": lambda a: need().redo_(),
         "undo_mark": lambda a: need().undo_mark(),

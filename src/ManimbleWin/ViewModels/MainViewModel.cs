@@ -44,7 +44,7 @@ namespace ManimbleWin.ViewModels
                     RaisePropertyChanged(nameof(UseRealRender));
                     RaisePropertyChanged(nameof(StatusBarText));
                     RebuildSourceLines();
-                    SyncSourceText();
+                    SyncSourceText(force: true);   // 切页：旧页草稿不属于新页
                     // 公式对象：用本机 LaTeX 渲染成真实 PNG（不依赖引擎）
                     EnsureLatexRendered(value);
                     // 引擎已连接时，切换幻灯片后加载该场景的真实渲染帧
@@ -76,10 +76,36 @@ namespace ManimbleWin.ViewModels
             }
         }
 
-        /// <summary>把当前页源码同步到可编辑文本框（切页/引擎刷新时调用）。</summary>
-        private void SyncSourceText()
+        /// <summary>引擎已接受的源码版本；用于判断代码窗格里是否还有未应用的草稿。</summary>
+        private string _appliedSource = "";
+
+        /// <summary>代码窗格里有改动但还没成功写回引擎。</summary>
+        public bool SourceHasDraft => CurrentSlide != null &&
+            !string.Equals(SourceText, _appliedSource, StringComparison.Ordinal);
+
+        // 冲突时用户选了「加载引擎版本」，先把草稿暂存这里，绝不在没确认前丢掉。
+        private string _sourceDraftBackup = "";
+        public string SourceDraftBackup
         {
-            SourceText = CurrentSlide?.Source ?? "";
+            get => _sourceDraftBackup;
+            private set
+            {
+                if (SetProperty(ref _sourceDraftBackup, value))
+                    RaisePropertyChanged(nameof(HasSourceDraftBackup));
+            }
+        }
+        public bool HasSourceDraftBackup => !string.IsNullOrEmpty(_sourceDraftBackup);
+
+        /// <summary>
+        /// 把当前页源码同步到可编辑文本框。后台写回触发的刷新不能覆盖用户草稿；
+        /// 切页 / 显式还原传 force: true 才会丢弃草稿。
+        /// </summary>
+        private void SyncSourceText(bool force = false)
+        {
+            string incoming = CurrentSlide?.Source ?? "";
+            if (!force && SourceHasDraft) return;
+            SourceText = incoming;
+            _appliedSource = incoming;
             SourceEditStatus = "已保存";
         }
 
@@ -259,22 +285,24 @@ namespace ManimbleWin.ViewModels
         private bool _drawerVisible = true;
         public bool DrawerVisible { get => _drawerVisible; set => SetProperty(ref _drawerVisible, value); }
 
-        /// <summary>独立终端面板（停靠在中栏底部，画布自动让位）。</summary>
-        private bool _terminalVisible;
-        public bool TerminalVisible { get => _terminalVisible; set => SetProperty(ref _terminalVisible, value); }
+        /// <summary>终端在抽屉里的标签序号（应用内唯一的终端入口）。</summary>
+        public const int TerminalDrawerTab = 3;
 
-        private System.Windows.GridLength _terminalHeight = new System.Windows.GridLength(240);
-        public System.Windows.GridLength TerminalHeight
+        /// <summary>终端可见性等同于抽屉停在「终端 1」标签；保留属性供菜单/快捷键使用。</summary>
+        public bool TerminalVisible
         {
-            get => _terminalHeight;
-            set => SetProperty(ref _terminalHeight, value);
+            get => DrawerVisible && SelectedDrawerTab == TerminalDrawerTab;
+            set
+            {
+                if (value) ShowDrawer(TerminalDrawerTab);
+                else DrawerVisible = false;
+            }
         }
 
-        /// <summary>打开终端面板：停靠在画布下方，不覆盖幻灯片。</summary>
+        /// <summary>打开终端：切到抽屉的终端标签，不再额外占用中栏底部一整行。</summary>
         public void ShowTerminalPanel()
         {
-            if (TerminalHeight.Value < 120) TerminalHeight = new System.Windows.GridLength(240);
-            TerminalVisible = true;
+            ShowDrawer(TerminalDrawerTab);
             ShowToast("终端已打开 · 输入 help 查看命令");
         }
 
@@ -1134,6 +1162,7 @@ namespace ManimbleWin.ViewModels
 
         public ICommand ApplySourceEditCommand { get; }
         public ICommand RevertSourceEditCommand { get; }
+        public ICommand RestoreSourceDraftCommand { get; }
         public ICommand OpenPreviewCommand { get; }
 
         /// <summary>交互式终端视图模型。</summary>
@@ -1305,6 +1334,7 @@ namespace ManimbleWin.ViewModels
             ExtractImagesCommand = new RelayCommand(_ => _ = ExtractImages());
             ApplySourceEditCommand = new RelayCommand(_ => ApplySourceEdit());
             RevertSourceEditCommand = new RelayCommand(_ => RevertSourceEdit());
+            RestoreSourceDraftCommand = new RelayCommand(_ => RestoreSourceDraft());
             OpenPreviewCommand = new RelayCommand(_ => OpenPreview());
             Terminal = new TerminalViewModel(this);
             Find = new FindViewModel(this);
@@ -2652,24 +2682,42 @@ namespace ManimbleWin.ViewModels
 
         #region 源码编辑 / 预览 / 终端桥接
 
-        /// <summary>应用代码窗格的修改：更新本地源码 → 写回引擎（若连接）→ 刷新源码窗格。</summary>
+        /// <summary>应用代码窗格的修改：写回引擎（若连接）→ 刷新源码窗格；失败时草稿原样保留。</summary>
         private async void ApplySourceEdit()
         {
             if (CurrentSlide == null) return;
             string edited = SourceText ?? "";
-            string before = CurrentSlide.Source;
-            CurrentSlide.Source = edited;
-            RebuildSourceLines();
             SourceEditStatus = "正在应用…";
 
             if (_engine != null && _engine.IsConnected)
             {
-                bool ok = await _engine.ApplyTextEdit(CurrentSlide, before, edited);
-                SourceEditStatus = ok ? "已应用并重新渲染" : "已保存到本地（引擎校验未通过）";
-                ShowToast(ok ? "代码已应用，画布已重新渲染" : "代码已保存到本地；语法或渲染错误，请检查");
+                // expected 由引擎侧实时读取，避免本地按行拼出的 CRLF / 尾注释被误判为冲突。
+                bool ok = await _engine.ApplyTextEditFromEditor(CurrentSlide, edited);
+                if (ok)
+                {
+                    _appliedSource = edited;
+                    SourceEditStatus = "已应用并重新渲染";
+                    SourceDraftBackup = "";
+                    ShowToast("代码已应用，画布已重新渲染");
+                    return;
+                }
+
+                // 没写回成功也绝不丢草稿：本地留一份，编辑器仍显示用户原文。
+                // 若冲突对话框里已选择「加载引擎版本」，编辑器里的 SourceText 已变，
+                // 这时不能再把刚加载的源码覆盖回草稿。
+                if (string.Equals(SourceText, edited, StringComparison.Ordinal))
+                {
+                    CurrentSlide.Source = edited;
+                    RebuildSourceLines();
+                    SourceEditStatus = "草稿已保留（未写回引擎）";
+                }
+                ShowToast("源码未写回；草稿已保留，请按代码窗格提示处理");
             }
             else
             {
+                _appliedSource = edited;
+                CurrentSlide.Source = edited;
+                RebuildSourceLines();
                 SourceEditStatus = "已保存（本地）";
                 ShowToast("代码已更新；连接引擎后可重新渲染验证");
             }
@@ -2677,8 +2725,35 @@ namespace ManimbleWin.ViewModels
 
         private void RevertSourceEdit()
         {
-            SyncSourceText();
+            SyncSourceText(force: true);
             ShowToast("已还原为上次保存的源码");
+        }
+
+        /// <summary>冲突时用户选择「加载引擎最新版本」：暂存草稿后再刷新，避免丢改动。</summary>
+        internal void LoadSourceFromEngine(Slide slide, string engineText, string draft)
+        {
+            if (slide == null) return;
+            slide.Source = engineText ?? "";
+            SourceDraftBackup = draft ?? "";
+            SyncSourceText(force: true);
+            SourceEditStatus = HasSourceDraftBackup
+                ? "已加载引擎版本；草稿已暂存，可点「草稿」恢复"
+                : "已加载引擎版本";
+            ShowToast(HasSourceDraftBackup ? "源码冲突：已加载引擎版本，草稿可恢复" : "已加载引擎版本");
+        }
+
+        private void RestoreSourceDraft()
+        {
+            if (!HasSourceDraftBackup)
+            {
+                ShowToast("没有暂存的草稿");
+                return;
+            }
+            string draft = SourceDraftBackup;
+            SourceDraftBackup = "";
+            SourceText = draft;
+            SourceEditStatus = "已恢复暂存草稿（待应用）";
+            ShowToast("已恢复暂存的源码草稿");
         }
 
         /// <summary>打开动画预览窗口。startIndex 为起始幻灯片索引（-1 表示当前页）。</summary>

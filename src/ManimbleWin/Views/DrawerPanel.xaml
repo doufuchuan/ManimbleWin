@@ -47,7 +47,64 @@
                      AcceptsReturn="True" TextWrapping="Wrap" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
                      BorderThickness="0" Padding="12,10" FontSize="12" VerticalScrollBarVisibility="Auto"/>
 
-            <local:TerminalView Visibility="{Binding SelectedDrawerTab, Converter={StaticResource IndexToVis}, ConverterParameter=3}"/>
+            <!-- 终端 1：会话标签栏 + 终端本体（应用内唯一的终端 UI） -->
+            <Grid Visibility="{Binding SelectedDrawerTab, Converter={StaticResource IndexToVis}, ConverterParameter=3}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" Padding="6,3" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}"
+                        Background="{DynamicResource BarBackgroundBrush}">
+                    <Grid>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- 一个标签 = 一个独立会话（各自的工作目录 / 输出 / 历史 / 进程） -->
+                            <ItemsControl ItemsSource="{Binding Terminal.Sessions}" VerticalAlignment="Center">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <RadioButton Style="{StaticResource DrawerTabButton}" FontSize="10.5"
+                                                     Padding="8,5,6,5" IsChecked="{Binding IsActive, Mode=OneWay}"
+                                                     Command="{Binding DataContext.Terminal.SelectSessionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                     CommandParameter="{Binding}" ToolTip="{Binding CurrentDirectory}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding TabTitle}" FontFamily="Consolas" VerticalAlignment="Center"/>
+                                                <Button Style="{StaticResource TabCloseButton}" Margin="5,0,0,0"
+                                                        Command="{Binding DataContext.Terminal.CloseSessionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip="关闭这个终端（其他标签不受影响）"/>
+                                            </StackPanel>
+                                        </RadioButton>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Button Content="CMD" Style="{StaticResource ToolTextButton}" FontSize="10" Padding="8,2" Height="21"
+                                    Margin="4,0,0,0" ToolTip="新建 CMD 标签"
+                                    Command="{Binding Terminal.NewSessionCommand}" CommandParameter="cmd"/>
+                            <Button Content="PS" Style="{StaticResource ToolTextButton}" FontSize="10" Padding="8,2" Height="21"
+                                    Margin="4,0,0,0" ToolTip="新建 PowerShell 标签"
+                                    Command="{Binding Terminal.NewSessionCommand}" CommandParameter="powershell"/>
+                            <TextBlock Text="{Binding Terminal.Active.CurrentDirectory}" FontFamily="Consolas" FontSize="10"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"
+                                       Margin="8,0,0,0" MaxWidth="300" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Terminal.Active.StatusText}" FontSize="10" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,8,0"/>
+                            <Button Content="停止" Style="{StaticResource ToolTextButton}" FontSize="10" Padding="8,2" Height="21"
+                                    Command="{Binding Terminal.CancelCommand}" ToolTip="中断正在运行的命令（Ctrl+C）"/>
+                            <Button Content="外部窗口" Style="{StaticResource ToolTextButton}" FontSize="10" Padding="8,2" Height="21" Margin="4,0,0,0"
+                                    Command="{Binding Terminal.OpenExternalCommand}" ToolTip="用系统控制台打开 cmd / PowerShell"/>
+                            <Button Content="清屏" Style="{StaticResource ToolTextButton}" FontSize="10" Padding="8,2" Height="21" Margin="4,0,0,0"
+                                    Command="{Binding Terminal.ClearCommand}" ToolTip="清空输出（Ctrl+L）"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <local:TerminalView Grid.Row="1"/>
+            </Grid>
         </Grid>
     </Grid>
 </UserControl>

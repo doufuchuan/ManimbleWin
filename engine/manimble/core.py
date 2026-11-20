@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -193,6 +194,44 @@ def _insert_where(stops: list, i: int) -> dict:
 
 TEXT_OPS = ("text", "wrap", "font", "color", "style", "table", "delete", "decorate", "highlight", "align", "columns",
             "spacing", "clear_format")
+
+
+def _movie_deck_without_breaks(deck: Path) -> Path:
+    """Copy a deck to a temporary folder with every next_slide() call removed.
+
+    Movie export needs one continuous animation per scene. manim-slides otherwise splits a scene at
+    next_slide() into several clips; concatenating those clips shows a jump at every build boundary.
+    The user's deck is never touched: the copy is thrown away after encoding.
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="manimble-movie-"))
+
+    def ignore(dirpath, names):
+        skip = [n for n in names if n in (".manimble", "__pycache__", ".git")]
+        if Path(dirpath).name == "slides":       # generated build data would make the copy look up to date
+            skip += [n for n in names if n.endswith(".json")]
+        return skip
+
+    shutil.copytree(deck, tmp, ignore=ignore, dirs_exist_ok=True)
+    for py in tmp.rglob("*.py"):
+        try:
+            text = py.read_text(encoding="utf-8")
+            tree = ast.parse(text)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        lines = text.splitlines(keepends=True)
+        drop: set[int] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+                continue
+            try:
+                called = ast.unparse(node.value.func)
+            except Exception:                     # noqa: BLE001 - malformed source is left to the renderer
+                continue
+            if called in ("self.next_slide", "next_slide"):
+                drop.update(range(node.lineno - 1, min(node.end_lineno, len(lines))))
+        if drop:
+            py.write_text("".join(line for i, line in enumerate(lines) if i not in drop), encoding="utf-8")
+    return tmp
 
 
 class Manimble:
@@ -4439,13 +4478,29 @@ class Manimble:
         self._settle()
         emit = self.on_event or (lambda e: None)
         from . import movie
+        tmp = None
+        show = None
         try:
-            if not self._build_animation_slides(selected, "export_movie", height):
-                return
-            deck = Path(self.deck).resolve()
-            clips = []
+            # next_slide() splits a scene into builds; exporting those clips and joining them makes the
+            # video jump at every boundary. Build from a disposable copy without those calls instead:
+            # the user's Python source, undo history, preview and deck exports stay untouched.
+            tmp = _movie_deck_without_breaks(Path(self.deck).resolve())
+            show = Manimble(str(tmp), self.python, cache=str(tmp / ".manimble"))
+            show.on_event = emit
+            show._cancel = self._cancel                   # the app's Cancel button stops the build too
+            show._job_procs = self._job_procs
+            temp_selected = []
             for s in selected:
-                data = json.loads((deck / "slides" / f"{s['name']}.json").read_text())
+                hit = next((x for x in show.all_scenes if x["name"] == s["name"]), None) or \
+                      next((x for x in show.scenes if x["name"] == s["name"]), None)
+                if hit is None:
+                    raise ValueError(f"unknown slide in export copy: {s['name']}")
+                temp_selected.append(hit)
+            if not show._build_animation_slides(temp_selected, "export_movie", height):
+                return
+            clips = []
+            for s in temp_selected:
+                data = json.loads((tmp / "slides" / f"{s['name']}.json").read_text())
                 builds = data.get("slides", [])
                 if not builds:
                     raise ValueError(f"{s['name']} has no animation clips")
@@ -4456,8 +4511,8 @@ class Manimble:
                     rel = slide.get("file") if kind == "video" else (slide.get("src") or slide.get("file"))
                     if not isinstance(rel, str):
                         raise ValueError(f"{s['name']} has a build without a clip file")
-                    p = (deck / rel).resolve()           # Manim Slides writes paths relative to the deck folder
-                    if not p.is_file() or not p.is_relative_to(deck):
+                    p = (tmp / rel).resolve()            # clips belong to the disposable deck copy
+                    if not p.is_file() or not p.is_relative_to(tmp):
                         raise ValueError(f"animation clip is missing: {rel}")
                     clips.append({"path": str(p), "kind": kind, "rate": float(slide.get("playback_rate") or 1.0),
                                   "label": f"{s['name']}" + (f" (build {k})" if len(builds) > 1 else ""),
@@ -4469,7 +4524,7 @@ class Manimble:
                 emit({"event": "export_movie", "phase": "encoding", "done": i, "total": n, "scene": label})
             lengths = movie.write_movie(clips, movie.SIZES[height], path, hold=hold, fps=fps, progress=prog,
                                         run=self._run_cancellable)
-            # where each build sits in the movie (a scripted export lays its narration and pointer over the holds)
+            # where each piece sits in the movie (a scripted export lays its narration over the holds)
             segments, start = [], 0.0
             for c, n in zip(clips, lengths):
                 segments.append({"scene": c["scene"], "build": c["build"], "start": start, "end": start + n,
@@ -4482,6 +4537,13 @@ class Manimble:
         except Exception as exc:                          # noqa: BLE001
             emit({"event": "export_movie", "phase": "error", "error": str(exc)})
         finally:
+            if show is not None:
+                try:
+                    show.close()
+                except Exception:                         # noqa: BLE001
+                    pass
+            if tmp is not None:
+                shutil.rmtree(tmp, ignore_errors=True)
             self._presenting = False
 
     def _present_slides(self, selected: list[dict], pending: set | None = None) -> list[dict]:

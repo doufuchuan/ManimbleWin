@@ -224,7 +224,120 @@ namespace ManimbleWin.ViewModels
                 return true;
             }
 
+            // cmd 没有 ls。宿主 PATH 若带 Git 的 usr\bin，cmd 会解析到 msys-2.0 的 ls.exe，
+            // 在重定向管道的子进程里初始化失败（0xC0000142 + NtCreateDirectoryObject 拒绝访问）。
+            // 像 PowerShell 的 ls 别名一样在应用内列目录，彻底不启动那个 exe。
+            var lm = Regex.Match(t, @"^(ls|ll)(?=\s|$)(.*)$", RegexOptions.IgnoreCase);
+            if (lm.Success)
+            {
+                ListDirectory(lm.Groups[2].Value);
+                return true;
+            }
+
             return false;
+        }
+
+        /// <summary>应用内 ls：列出目录，支持 -a/-l 等开关（忽略）与一个或多个路径。</summary>
+        private void ListDirectory(string rest)
+        {
+            var tokens = SplitArgs(rest);
+            bool showHidden = false;
+            var paths = new List<string>();
+            foreach (string token in tokens)
+            {
+                if (token.StartsWith("-", StringComparison.Ordinal))
+                {
+                    // -a / -la：显示隐藏文件；其他 Unix 开关对 Windows 目录没有额外含义
+                    if (token.IndexOf('a') >= 0 || token.IndexOf('A') >= 0) showHidden = true;
+                    continue;
+                }
+                paths.Add(token);
+            }
+            if (paths.Count == 0) paths.Add(".");
+
+            foreach (string raw in paths)
+            {
+                string arg = raw.Trim().Trim('"');
+                if (arg == "~") arg = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                string target;
+                try { target = Path.IsPathRooted(arg) ? arg : Path.GetFullPath(Path.Combine(CurrentDirectory, arg)); }
+                catch { target = arg; }
+
+                bool isFile = File.Exists(target);
+                if (!Directory.Exists(target) && !isFile)
+                {
+                    Append("找不到路径：" + arg, Red);
+                    continue;
+                }
+                if (paths.Count > 1) Append(target + ":", Blue, true);
+                if (isFile) AppendFileLine(new FileInfo(target));
+                else AppendDirectoryListing(target, showHidden);
+            }
+        }
+
+        private void AppendDirectoryListing(string path, bool showHidden)
+        {
+            var rows = new List<FileSystemInfo>();
+            try
+            {
+                foreach (var entry in new DirectoryInfo(path).EnumerateFileSystemInfos())
+                {
+                    bool hidden = (entry.Attributes & FileAttributes.Hidden) != 0;
+                    if (hidden && !showHidden) continue;
+                    rows.Add(entry);
+                }
+            }
+            catch (Exception ex)
+            {
+                Append("无法读取目录：" + ex.Message, Red);
+                return;
+            }
+
+            rows.Sort((a, b) =>
+            {
+                bool ad = (a.Attributes & FileAttributes.Directory) != 0;
+                bool bd = (b.Attributes & FileAttributes.Directory) != 0;
+                if (ad != bd) return ad ? -1 : 1;
+                return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+            });
+
+            if (rows.Count == 0) { Append("（目录为空）", Grey); return; }
+            foreach (var entry in rows)
+            {
+                bool isDir = (entry.Attributes & FileAttributes.Directory) != 0;
+                string mode = isDir ? "<DIR>" : "";
+                string size = isDir ? "" : ((FileInfo)entry).Length.ToString();
+                Append($"{mode,-6} {size,12}  {entry.Name}", isDir ? Blue : White);
+            }
+            Append($"    {rows.Count} 个对象", Grey);
+        }
+
+        private void AppendFileLine(FileInfo file)
+            => Append($"{"",-6} {file.Length,12}  {file.Name}", White);
+
+        /// <summary>按空白切参数，但保留引号内的空格（ls "My Folder"）。</summary>
+        private static List<string> SplitArgs(string s)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrEmpty(s)) return result;
+            var cur = new StringBuilder();
+            char quote = '\0';
+            foreach (char ch in s)
+            {
+                if (quote != '\0')
+                {
+                    if (ch == quote) quote = '\0';
+                    else cur.Append(ch);
+                }
+                else if (ch == '"' || ch == '\'') quote = ch;
+                else if (char.IsWhiteSpace(ch))
+                {
+                    if (cur.Length > 0) { result.Add(cur.ToString()); cur.Clear(); }
+                }
+                else cur.Append(ch);
+            }
+            if (cur.Length > 0) result.Add(cur.ToString());
+            return result;
         }
 
         private async Task RunShellAsync(string cmd)
@@ -246,13 +359,19 @@ namespace ManimbleWin.ViewModels
 
                 // PowerShell 的 stderr 是 CLIXML 格式，先还原成普通文本再显示
                 var clixml = new ClixmlFilter();
+                bool msysCrash = false;
 
-                var outTask = PumpAsync(p.StandardOutput.BaseStream, s => Append(CleanAnsi(s), White));
+                var outTask = PumpAsync(p.StandardOutput.BaseStream, s =>
+                {
+                    if (IsMsysFatal(s)) { msysCrash = true; return; }
+                    Append(CleanAnsi(s), White);
+                });
                 var errTask = PumpAsync(p.StandardError.BaseStream, s =>
                 {
                     foreach (string line in clixml.Feed(s))
                     {
                         if (line.Length == 0) continue;
+                        if (IsMsysFatal(line)) { msysCrash = true; continue; }
                         Append(CleanAnsi(line), Red);
                     }
                 });
@@ -261,13 +380,20 @@ namespace ManimbleWin.ViewModels
                 foreach (string line in clixml.Flush())
                 {
                     if (line.Length == 0) continue;
+                    if (IsMsysFatal(line)) { msysCrash = true; continue; }
                     Append(CleanAnsi(line), Red);
                 }
                 await Task.Run(() => p.WaitForExit());
 
+                // MSYS2/Git 工具在受限子进程里会崩在 msys-2.0.dll 初始化上，
+                // 原始堆栈对用户没有意义；换成可操作的提示（CLIXML 过滤层不受影响）。
+                if (msysCrash)
+                    Append("MSYS2/Git 工具在本终端无法启动（命名对象被拒绝）。已隐藏崩溃堆栈；请改用 Windows 命令（如 dir），或在「外部窗口」中运行该工具。", Orange);
+
                 int code = -1;
                 try { code = p.ExitCode; } catch { }
-                if (code != 0) Append($"命令退出，代码 {code}", Red);
+                if (code != 0 && !(msysCrash && (uint)code == 0xC0000142))
+                    Append($"命令退出，代码 {code}", Red);
             }
             catch (Exception ex)
             {
@@ -301,8 +427,50 @@ namespace ManimbleWin.ViewModels
                 CreateNoWindow = true
             };
             EnvironmentService.ApplyCleanTemp(psi);
+            ApplySafePath(psi);
             return psi;
         }
+
+        /// <summary>
+        /// 子进程继承宿主 PATH。宿主若从 Git Bash / MSYS2 启动，PATH 里的 usr\bin 会让 cmd 把
+        /// ls/cat/grep 解析成 msys-2.0 程序；它们在重定向管道下创建 \BaseNamedObjects 失败，
+        /// 直接 0xC0000142 崩溃。这里只剔除这些 POSIX 工具目录，保留 Git\bin（git.exe）等原生工具。
+        /// </summary>
+        private static void ApplySafePath(ProcessStartInfo psi)
+        {
+            try
+            {
+                string key = null;
+                foreach (string k in psi.Environment.Keys)
+                {
+                    if (string.Equals(k, "PATH", StringComparison.OrdinalIgnoreCase)) { key = k; break; }
+                }
+                if (key == null) return;
+
+                string path = psi.Environment[key] ?? "";
+                var kept = new List<string>();
+                foreach (string entry in path.Split(Path.PathSeparator))
+                {
+                    if (!IsMsysPosixBin(entry)) kept.Add(entry);
+                }
+                psi.Environment[key] = string.Join(Path.PathSeparator.ToString(), kept);
+            }
+            catch { }
+        }
+
+        private static bool IsMsysPosixBin(string entry)
+        {
+            if (string.IsNullOrWhiteSpace(entry)) return false;
+            string s = entry.Trim().Trim('"').Replace('/', '\\').TrimEnd('\\').ToLowerInvariant();
+            if (!s.Contains("\\usr\\bin") && !s.Contains("\\usr\\local\\bin")) return false;
+            // Git / PortableGit / MSYS2 / Cygwin 的 usr\bin 都靠 msys-2.0.dll 或 cygwin1.dll。
+            return s.Contains("git") || s.Contains("msys") || s.Contains("mingw") || s.Contains("cygwin");
+        }
+
+        private static bool IsMsysFatal(string line)
+            => !string.IsNullOrEmpty(line) &&
+               (line.IndexOf("*** fatal error", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                line.IndexOf("NtCreateDirectoryObject(", StringComparison.OrdinalIgnoreCase) >= 0);
 
         /// <summary>逐行读取子进程输出（按字节读出，避免编码预设导致的乱码）。</summary>
         private static async Task PumpAsync(Stream stream, Action<string> onLine)
