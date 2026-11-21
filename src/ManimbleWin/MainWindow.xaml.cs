@@ -201,6 +201,11 @@ namespace ManimbleWin
         private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
         {
             if (!(DataContext is MainViewModel vm)) return;
+
+            // 批注编辑中点了窗口别处 → 先提交。判定"别处"的唯一依据是点击源在不在
+            // 正在编辑的那条批注自己的 TextBox 里（在里面说明用户在移光标）。
+            vm.Feedback.CommitPendingEditIfOutside(e.OriginalSource);
+
             if (!vm.IsHighlightPickerOpen && !vm.IsColorPickerOpen) return;
 
             var src = e.OriginalSource as DependencyObject;
@@ -248,6 +253,17 @@ namespace ManimbleWin
             if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Alt) && e.Key == Key.F)
             {
                 vm.OpenFind(true);
+                e.Handled = true;
+                return;
+            }
+
+            // 反馈面板：Alt+Shift+Ctrl+F。
+            // ⚠ 刻意不用 Alt+Ctrl+F —— 那是「查找和替换…」的既有快捷键（编辑菜单里标着），
+            // 把它挪走等于回退既有功能。这里取同族的四键组合（本应用里 Alt+Shift+Ctrl+P 已有先例），
+            // 且必须在下面那条 TextBoxBase 守卫之前：在代码框里也要能叫出面板。
+            if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift) && e.Key == Key.F)
+            {
+                vm.MenuCommand.Execute("ViewFeedback");
                 e.Handled = true;
                 return;
             }
@@ -303,6 +319,8 @@ namespace ManimbleWin
                     if (vm.Find != null && vm.Find.IsOpen) { vm.Find.Close(); e.Handled = true; break; }
                     if (vm.TerminalVisible) { vm.TerminalVisible = false; e.Handled = true; break; }
                     if (InfoBar.Visibility == Visibility.Visible) { InfoBar.Visibility = Visibility.Collapsed; e.Handled = true; break; }
+                    // 批注模式排在清空选区之前：先退出批注模式（画布恢复原有交互），再谈选区
+                    if (vm.Feedback.IsAnnotating) { vm.Feedback.SetAnnotating(false); e.Handled = true; break; }
                     vm.ClearSelection();
                     e.Handled = true;
                     break;

@@ -30,6 +30,13 @@ namespace ManimbleWin.Views
         private bool _rubberActive;
         private Point _rubberStart;
 
+        // 批注拖动（拖动中只改内存，松手才落盘）
+        private FeedbackNoteViewModel _noteDragVm;
+        private Point _noteDragStart;
+        private bool _noteDragMoved;
+        private double _noteDragOriginX;
+        private double _noteDragOriginY;
+
         public CanvasView()
         {
             InitializeComponent();
@@ -45,6 +52,9 @@ namespace ManimbleWin.Views
 
         private void CanvasBG_Click(object sender, MouseButtonEventArgs e)
         {
+            // 批注模式下点画布（幻灯片外的灰区）也不改变对象选中：
+            // 否则"进批注模式顺手点一下"就会把用户辛苦选好的一组对象丢掉（PRD FB-P0-03）
+            if (VM?.Feedback?.IsAnnotating == true) return;
             if (VM != null) VM.ClearSelection();
         }
 
@@ -186,5 +196,173 @@ namespace ManimbleWin.Views
         }
 
         private void HideRubber() => RubberBand.Visibility = Visibility.Collapsed;
+
+        #region 批注层
+
+        /// <summary>
+        /// 批注模式下在幻灯片上点一下：在该点新建一条空批注并直接进编辑。
+        /// <para>⚠ 坐标只取 <c>e.GetPosition(SlideSurface)</c>：Viewbox 已经把它换算进 1280×720 逻辑坐标系，
+        /// 这里<b>不能再乘/除任何缩放比</b>，否则批注会落在点击点的斜上方（风险 R3）。</para>
+        /// </summary>
+        private void FeedbackCatcher_Click(object sender, MouseButtonEventArgs e)
+        {
+            FeedbackViewModel feedback = VM?.Feedback;
+            if (feedback == null || !feedback.IsAnnotating) return;
+
+            Point p = e.GetPosition(SlideSurface);
+            double x = Math.Min(Math.Max(0, p.X / SlideSurface.ActualWidth), 0.96);
+            double y = Math.Min(Math.Max(0, p.Y / SlideSurface.ActualHeight), 0.96);
+
+            feedback.EndEdit();                       // 先结束上一条（文本为空会被丢弃）
+            FeedbackNoteViewModel note = feedback.AddAt(x, y);
+            if (note != null)
+            {
+                feedback.BeginEdit(note);
+                FocusNoteTextBox(note);
+            }
+            e.Handled = true;                         // 不让 SlideBG_Click 清选区 / 开始框选
+        }
+
+        /// <summary>按下批注块：可能是"进编辑"，也可能是"开始拖动"，松手时才见分晓。</summary>
+        private void NoteBox_Click(object sender, MouseButtonEventArgs e)
+        {
+            FeedbackViewModel feedback = VM?.Feedback;
+            if (feedback == null) return;
+            if (!((sender as Border)?.Tag is FeedbackNoteViewModel note)) return;
+
+            if (note.IsEditing)
+            {
+                // 编辑中：让 TextBox 自己摆光标
+                e.Handled = true;
+                return;
+            }
+            if (feedback.IsReadOnly)
+            {
+                // 只读态：能看不能改，也不拖动（避免看起来"能改"）
+                e.Handled = true;
+                return;
+            }
+            // 已经不在 Store 里的条目（例如刚被丢弃的空批注，容器还没被摘掉）不再进编辑
+            if (feedback.Store?.Find(note.Id) == null)
+            {
+                e.Handled = true;
+                return;
+            }
+
+            _noteDragVm = note;
+            _noteDragStart = e.GetPosition(SlideSurface);
+            _noteDragOriginX = note.X;
+            _noteDragOriginY = note.Y;
+            _noteDragMoved = false;
+            (sender as Border)?.CaptureMouse();
+
+            // 必须吃掉：否则会冒泡到 SlideSurface 的 SlideBG_Click（清选区 + 开始框选）
+            e.Handled = true;
+        }
+
+        private void NoteBox_Move(object sender, MouseEventArgs e)
+        {
+            if (_noteDragVm == null) return;
+
+            Point now = e.GetPosition(SlideSurface);
+            if (!_noteDragMoved &&
+                (Math.Abs(now.X - _noteDragStart.X) > 3 || Math.Abs(now.Y - _noteDragStart.Y) > 3))
+                _noteDragMoved = true;
+            if (!_noteDragMoved) return;
+
+            // 同一坐标系（SlideSurface）里算位移，再折算成比例：与缩放无关
+            _noteDragVm.MoveTo(
+                _noteDragOriginX + (now.X - _noteDragStart.X) / FeedbackNoteViewModel.SlideWidth,
+                _noteDragOriginY + (now.Y - _noteDragStart.Y) / FeedbackNoteViewModel.SlideHeight);
+        }
+
+        private void NoteBox_Up(object sender, MouseButtonEventArgs e)
+        {
+            if (_noteDragVm == null) return;
+
+            FeedbackNoteViewModel note = _noteDragVm;
+            _noteDragVm = null;
+            if (sender is UIElement el && el.IsMouseCaptured) el.ReleaseMouseCapture();
+
+            FeedbackViewModel feedback = VM?.Feedback;
+            if (_noteDragMoved)
+            {
+                feedback?.CommitMove(note);       // 松手写一次盘
+            }
+            else
+            {
+                feedback?.BeginEdit(note);        // 单击即进编辑（PRD FB-P1-01：不要求双击）
+                FocusNoteTextBox(note);
+            }
+            e.Handled = true;
+        }
+
+        private void NoteClose_Click(object sender, MouseButtonEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is FeedbackNoteViewModel note)
+                VM?.Feedback?.Remove(note);
+            e.Handled = true;
+        }
+
+        /// <summary>
+        /// 批注输入框的键位。窗口级的 <c>PreviewKeyDown</c> 对 <c>TextBoxBase</c> 早退（不能抢编辑器按键），
+        /// 所以 Esc / Ctrl+Enter 只能在这里处理（风险 R4）。
+        /// </summary>
+        private void NoteText_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
+            {
+                VM?.Feedback?.EndEdit();
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+            {
+                VM?.Feedback?.EndEdit();
+                e.Handled = true;
+            }
+        }
+
+        /// <summary>失焦即提交（点别处 / 点工具按钮 / 切页都会走到这里）。EndEdit 幂等，重复触发不会多写盘。</summary>
+        private void NoteText_LostFocus(object sender, KeyboardFocusChangedEventArgs e)
+            => VM?.Feedback?.EndEdit();
+
+        /// <summary>把键盘焦点放进指定批注的输入框。容器是模板生成的，得等一次布局才找得到。</summary>
+        private void FocusNoteTextBox(FeedbackNoteViewModel note)
+        {
+            if (note == null) return;
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                int index = FeedbackNotes.Items.IndexOf(note);
+                if (index < 0) return;
+                if (!(FeedbackNotes.ItemContainerGenerator.ContainerFromIndex(index) is DependencyObject container)) return;
+
+                TextBox box = FindChild<TextBox>(container);
+                if (box == null) return;
+
+                box.Focus();
+                Keyboard.Focus(box);
+                box.CaretIndex = box.Text?.Length ?? 0;
+            }), System.Windows.Threading.DispatcherPriority.Input);
+        }
+
+        private static T FindChild<T>(DependencyObject root) where T : DependencyObject
+        {
+            if (root == null) return null;
+
+            int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < count; i++)
+            {
+                DependencyObject child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+                if (child is T typed) return typed;
+
+                T deeper = FindChild<T>(child);
+                if (deeper != null) return deeper;
+            }
+            return null;
+        }
+
+        #endregion
     }
 }

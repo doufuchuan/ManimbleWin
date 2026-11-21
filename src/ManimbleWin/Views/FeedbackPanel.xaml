@@ -1,0 +1,272 @@
+<UserControl x:Class="ManimbleWin.Views.FeedbackPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             UseLayoutRounding="True"
+             Background="{DynamicResource SidebarBackgroundBrush}">
+    <!--
+        右栏反馈面板。DataContext 约定为 FeedbackViewModel（由 MainWindow.xaml 里
+        DataContext="{Binding Feedback}" 建立），所以下面所有绑定都<b>不带</b> Feedback. 前缀。
+        与 InspectorPanel 共用第 4 列与 InspectorWidth 分隔条：切面板只是把这一段 Collapsed，
+        InspectorPanel 不卸载，所以选中对象/滚动位置/属性面板状态原地保留。
+    -->
+    <UserControl.Resources>
+        <!-- 行/分组里的图标小按钮：透明底、hover 才出底，尺寸压到 20 以内 -->
+        <Style x:Key="FeedbackIconButton" TargetType="Button">
+            <Setter Property="Width" Value="20"/>
+            <Setter Property="Height" Value="20"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 整行可点：把"点行 → 跳页"做成一个铺满行的按钮，hover 出淡底 -->
+        <Style x:Key="FeedbackRowButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" Padding="2,2,6,4">
+                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleBackgroundBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 「开始批注」开关：按下态用 12% 强调色叠底（不硬编码色值，主题切换自动跟随） -->
+        <Style x:Key="FeedbackAnnotateToggle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" CornerRadius="5" Padding="10,6"
+                                Background="{DynamicResource SubtleBackgroundBrush}"
+                                BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>   <!-- 头 -->
+            <RowDefinition Height="Auto"/>   <!-- 黄条（只读/解析失败） -->
+            <RowDefinition Height="Auto"/>   <!-- 工具行：‹ N of M › / 全部删除 -->
+            <RowDefinition Height="Auto"/>   <!-- 开始批注 -->
+            <RowDefinition Height="*"/>      <!-- 分组列表 / 空态 -->
+            <RowDefinition Height="Auto"/>   <!-- 常驻小字 -->
+        </Grid.RowDefinitions>
+
+        <!-- ===== 头 ===== -->
+        <Border Grid.Row="0" Padding="12,10,10,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 对话气泡：纯 Path，颜色固定为批注红（不随主题变） -->
+                <Path Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,0"
+                      Width="15" Height="15" Stretch="Uniform" Fill="{StaticResource FeedbackRedBrush}"
+                      Data="M2,2 H18 A2,2 0 0 1 20,4 V12 A2,2 0 0 1 18,14 H8 L4,18 V14 H2 A2,2 0 0 1 0,12 V4 A2,2 0 0 1 2,2 Z"/>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="反馈" FontSize="13" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                    <TextBlock Text="红字批注，只在编辑时可见" FontSize="10.5"
+                               Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <Button Grid.Column="2" Content="完成" Style="{StaticResource ToolTextButton}"
+                        Command="{Binding DoneCommand}" VerticalAlignment="Center"
+                        ToolTip="收起反馈面板，回到检查器"/>
+            </Grid>
+        </Border>
+
+        <!-- ===== 只读 / 解析失败黄条 ===== -->
+        <Border Grid.Row="1" Margin="10,0,10,6" Style="{StaticResource NoticeBar}"
+                Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}">
+            <StackPanel>
+                <TextBlock Style="{StaticResource NoticeText}" Text="{Binding ErrorText}"/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button Content="打开所在文件夹" Style="{StaticResource NoticeLinkButton}"
+                            Command="{Binding OpenFolderCommand}" Padding="0,2"
+                            ToolTip="打开工作副本里 feedback.json 所在的目录"/>
+                    <Button Content="重新读取" Style="{StaticResource NoticeLinkButton}" Margin="8,0,0,0"
+                            Command="{Binding ReloadCommand}" Padding="0,2"
+                            ToolTip="手工把文件修好之后点这里，不必重启应用"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- ===== 工具行：上一条 / 计数 / 下一条 / 全部删除 ===== -->
+        <Grid Grid.Row="2" Margin="10,0,10,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="0" Style="{StaticResource FeedbackIconButton}"
+                    Command="{Binding PreviousCommand}" IsEnabled="{Binding HasBadge}" ToolTip="上一条批注">
+                <TextBlock Text="‹" FontSize="14" Foreground="{DynamicResource TextSecondaryBrush}"/>
+            </Button>
+
+            <TextBlock Grid.Column="1" Text="{Binding CounterText}" FontSize="10.5" Margin="6,0"
+                       VerticalAlignment="Center" HorizontalAlignment="Center"
+                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+
+            <Button Grid.Column="2" Style="{StaticResource FeedbackIconButton}"
+                    Command="{Binding NextCommand}" IsEnabled="{Binding HasBadge}" ToolTip="下一条批注">
+                <TextBlock Text="›" FontSize="14" Foreground="{DynamicResource TextSecondaryBrush}"/>
+            </Button>
+
+            <Button Grid.Column="3" Content="全部删除" Style="{StaticResource ToolTextButton}"
+                    Margin="8,0,0,0" Command="{Binding RemoveAllCommand}"
+                    IsEnabled="{Binding CanEdit}" ToolTip="删除本 deck 的全部批注（不可撤销）"/>
+        </Grid>
+
+        <!-- ===== 开始批注 ===== -->
+        <ToggleButton Grid.Row="3" Margin="10,0,10,8" Style="{StaticResource FeedbackAnnotateToggle}"
+                      IsChecked="{Binding IsAnnotating, Mode=TwoWay}"
+                      IsEnabled="{Binding CanEdit}"
+                      ToolTip="在幻灯片上点一下写反馈；Esc 退出批注模式">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <Path Data="{StaticResource Icon.Plus}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                      StrokeThickness="1.6" Stretch="Uniform" Width="10" Height="10" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                <TextBlock Text="开始批注" FontSize="11.5"/>
+            </StackPanel>
+        </ToggleButton>
+
+        <!-- ===== 分组列表 ===== -->
+        <Grid Grid.Row="4">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          Padding="10,0,10,0">
+                <ItemsControl ItemsSource="{Binding Groups}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,0,0,8">
+                                <!-- 组标题：小字、次要色 -->
+                                <TextBlock Text="{Binding Title}" FontSize="9.5" FontWeight="SemiBold"
+                                           Margin="2,0,0,3" TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+
+                                <ItemsControl ItemsSource="{Binding Notes}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <!-- 选中行淡底：整块 Border，触发器绑 IsSelected -->
+                                            <Border x:Name="RowBd" CornerRadius="4" Background="Transparent">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <Button Grid.Column="0" Style="{StaticResource FeedbackRowButton}"
+                                                            Command="{Binding DataContext.GoToCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}"
+                                                            ToolTip="跳到这一页">
+                                                        <StackPanel>
+                                                            <!-- WPF 没有 MaxLines：MaxHeight ≈ 3 行 + 末行裁剪
+                                                                 （PRD 要求省略号，这里是已知视觉差异，见架构 §12.3） -->
+                                                            <TextBlock Text="{Binding DisplayText}" FontSize="11.5" TextWrapping="Wrap"
+                                                                       MaxHeight="54" TextTrimming="CharacterEllipsis"
+                                                                       Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                                            <TextBlock Text="{Binding BuildLabel}" FontSize="9.5" Margin="0,2,0,0"
+                                                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                                        </StackPanel>
+                                                    </Button>
+
+                                                    <Button Grid.Column="1" Style="{StaticResource FeedbackIconButton}"
+                                                            VerticalAlignment="Top" Margin="2,2,0,0"
+                                                            Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding}"
+                                                            IsEnabled="{Binding DataContext.CanEdit, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            ToolTip="删除这条批注（不可撤销）">
+                                                        <Path Data="{StaticResource Icon.Close}" Stroke="{StaticResource FeedbackRedBrush}"
+                                                              StrokeThickness="1.4" Stretch="Uniform" Width="8" Height="8"/>
+                                                    </Button>
+                                                </Grid>
+                                            </Border>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter TargetName="RowBd" Property="Background"
+                                                            Value="{DynamicResource AccentSoftBrush}"/>
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <!-- 空态：盖在列表同一格里 -->
+            <Grid Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVis}}" Margin="18,10,18,18"
+                  VerticalAlignment="Top">
+                <StackPanel>
+                    <TextBlock Text="还没有批注" FontSize="12.5" FontWeight="SemiBold" HorizontalAlignment="Center"
+                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                    <TextBlock Text="点「开始批注」，然后在幻灯片上点一下写下第一条反馈"
+                               FontSize="11" TextWrapping="Wrap" TextAlignment="Center" Margin="0,6,0,12"
+                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    <Button Content="开始批注" Style="{StaticResource AccentButton}" HorizontalAlignment="Center"
+                            Command="{Binding ToggleAnnotateCommand}" IsEnabled="{Binding CanEdit}"/>
+                </StackPanel>
+            </Grid>
+        </Grid>
+
+        <!-- ===== 常驻小字 ===== -->
+        <Border Grid.Row="5" Padding="10,6,10,8" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource SeparatorBrush}">
+            <TextBlock Text="{Binding FooterHint}" FontSize="10" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+        </Border>
+    </Grid>
+</UserControl>

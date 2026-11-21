@@ -35,4 +35,10 @@
     <SolidColorBrush x:Key="WhiteBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="DangerBrush" Color="#E5484D"/>
     <SolidColorBrush x:Key="SuccessBrush" Color="#30A46C"/>
+
+    <!-- 批注（反馈）三色：主题无关常量。ThemeManager.Apply() 只改它认识的固定键，
+         所以这三个必须用 StaticResource 引用，暗色主题下红字也保持同一个红（PRD §5.1）。 -->
+    <SolidColorBrush x:Key="FeedbackRedBrush" Color="#FF2E29"/>        <!-- 文字 / ✕ / 角标底色 -->
+    <SolidColorBrush x:Key="FeedbackRedSoftBrush" Color="#12FF2E29"/>  <!-- 底色，同色 α 0.07 -->
+    <SolidColorBrush x:Key="FeedbackRedBorderBrush" Color="#BFFF2E29"/> <!-- 边框，同色 α 0.75 -->
 </ResourceDictionary>

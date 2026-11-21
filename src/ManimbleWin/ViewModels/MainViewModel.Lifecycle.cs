@@ -244,6 +244,8 @@ namespace ManimbleWin.ViewModels
 
                 _session = session;
                 _workspace.Refresh(_session);
+                // 打开 deck 时就把批注读进来（只读一次、不写盘）：这样面板没打开时按钮角标也是准的
+                Feedback.Attach(_session);
                 _recent.Note(session.OriginalDeckPath);
                 ReloadRecentDecks();
 
@@ -479,6 +481,8 @@ namespace ManimbleWin.ViewModels
             _modifiedTimer?.Stop();
             WorkspaceSession old = _session;
             _session = null;
+            // 先断开批注：Detach 里不写盘（批注随副本一起被丢弃，这是特性），随后 Discard 会删掉整个副本
+            Feedback.Detach();
             try { _engine.Shutdown(); } catch { }
             if (old != null)
             {
@@ -560,6 +564,8 @@ namespace ManimbleWin.ViewModels
                 ShowToast("正在处理上一个操作，请稍候");
                 return false;
             }
+            // 正在输入的批注先落盘：否则 feedback.json 还是旧内容，Save 会把它当成"没改过"
+            Feedback.EndEdit();
             if (!await EnsureDraftAppliedAsync()) return false;
 
             _deckBusy = true;
@@ -644,6 +650,9 @@ namespace ManimbleWin.ViewModels
                     ShowToast("还原失败（详见日志）");
                     return false;
                 }
+                // ★ 内存必须跟着磁盘回滚：副本里的 feedback.json 可能刚被按基线删掉/还原，
+                // 不 Reload 的话内存还留着这些批注，用户下次改任意一条就会把已还原的内容写回去（风险 R6）
+                Feedback.Reload();
                 ShowToast("已还原到原始文件");
                 return true;
             }

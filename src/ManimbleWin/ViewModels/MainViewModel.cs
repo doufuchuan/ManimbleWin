@@ -45,6 +45,8 @@ namespace ManimbleWin.ViewModels
                     RaisePropertyChanged(nameof(StatusBarText));
                     RebuildSourceLines();
                     SyncSourceText(force: true);   // 切页：旧页草稿不属于新页
+                    // 批注只显示当前页：换页即换集合（编辑中的那条在 EndEdit 里已落盘）
+                    Feedback?.OnSceneChanged(value.Name);
                     // 公式对象：用本机 LaTeX 渲染成真实 PNG（不依赖引擎）
                     EnsureLatexRendered(value);
                     // 引擎已连接时，切换幻灯片后加载该场景的真实渲染帧
@@ -282,7 +284,33 @@ namespace ManimbleWin.ViewModels
         public bool NavigatorVisible { get => _navigatorVisible; set => SetProperty(ref _navigatorVisible, value); }
 
         private bool _inspectorVisible = true;
-        public bool InspectorVisible { get => _inspectorVisible; set => SetProperty(ref _inspectorVisible, value); }
+        /// <summary>
+        /// 用户"想不想要右栏"。刻意<b>不</b>在打开反馈面板时把它改成 false：
+        /// 那样关面板时就必须"恢复"，而中间用户手动改过菜单勾选就会丢状态（风险 R1）。
+        /// 反馈面板与检查器的互斥用派生可见性表达（<see cref="InspectorPaneVisible"/>）。
+        /// </summary>
+        public bool InspectorVisible
+        {
+            get => _inspectorVisible;
+            set
+            {
+                if (!SetProperty(ref _inspectorVisible, value)) return;
+
+                // 右栏整列都被关掉了，反馈面板没有容身之处：一起让位，保证"菜单勾选"与"看到的"一致
+                if (!value) Feedback?.ClosePanel();
+                RaisePropertyChanged(nameof(InspectorPaneVisible));
+                RaisePropertyChanged(nameof(RightPaneVisible));
+            }
+        }
+
+        /// <summary>反馈面板占位。</summary>
+        public bool FeedbackVisible => Feedback?.IsPanelOpen == true;
+
+        /// <summary>检查器 + 代码占位（反馈面板开着时让位，但只是 Collapsed，不卸载）。</summary>
+        public bool InspectorPaneVisible => InspectorVisible && !FeedbackVisible;
+
+        /// <summary>第 4 列（含分隔条）是否显示：检查器或反馈面板任一开着。</summary>
+        public bool RightPaneVisible => InspectorVisible || FeedbackVisible;
 
         private bool _drawerVisible = true;
         public bool DrawerVisible { get => _drawerVisible; set => SetProperty(ref _drawerVisible, value); }
@@ -1181,6 +1209,12 @@ namespace ManimbleWin.ViewModels
         public TerminalViewModel Terminal { get; }
 
         /// <summary>
+        /// 批注（反馈）子视图模型。生命周期挂在 <b>deck 打开 → deck 关闭</b> 上，不挂在面板开合上：
+        /// 角标在面板关闭时也要准，关面板再打开也不能丢内存态（架构 §3.6）。
+        /// </summary>
+        public FeedbackViewModel Feedback { get; }
+
+        /// <summary>
         /// 当前 deck 所在文件夹（终端 pwd、图片拷贝都用它）。
         /// 编辑期一律指向<b>工作副本</b>：写进 assets 的图片要落在副本里，才会被 Save 写回原目录。
         /// 没有会话时才回退到示例 deck（原型模式）。
@@ -1354,6 +1388,16 @@ namespace ManimbleWin.ViewModels
             OpenPreviewCommand = new RelayCommand(_ => OpenPreview());
             Terminal = new TerminalViewModel(this);
             Find = new FindViewModel(this);
+            Feedback = new FeedbackViewModel(this);
+
+            // 子 VM 的"面板开着没有"要翻译成主 VM 的三个派生可见性，否则右栏不会换面板
+            Feedback.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName != nameof(FeedbackViewModel.IsPanelOpen)) return;
+                RaisePropertyChanged(nameof(FeedbackVisible));
+                RaisePropertyChanged(nameof(InspectorPaneVisible));
+                RaisePropertyChanged(nameof(RightPaneVisible));
+            };
 
             BuildThemes();
             BuildSampleDeck();
@@ -2659,10 +2703,11 @@ namespace ManimbleWin.ViewModels
 
                 case "Docs": ShowToast("文档：pachterlab.github.io/Manimble"); break;
                 case "About": ShowToast("ManimbleWin — 界面原型 0.5.0"); break;
-                // 格式栏的「脚本」「反馈」两个死链：文案不再说「原型模式」，
+                // 格式栏的「脚本」仍是死链：文案不再说「原型模式」，
                 // 免得用户以为点了只是演示（PRD FMT-P2-04）
                 case "Script": ShowToast("脚本暂未支持，后续版本提供"); break;
-                case "ViewFeedback": ShowToast("查看反馈暂未支持，后续版本提供"); break;
+                // 「反馈」不再是死链：切到右栏反馈面板（开关语义，再点一次回检查器）
+                case "ViewFeedback": Feedback.TogglePanel(); break;
                 case "Insert": InsertObject("Text"); break;
                 default: if (!string.IsNullOrEmpty(action)) ShowToast(action + " — 原型模式"); break;
             }

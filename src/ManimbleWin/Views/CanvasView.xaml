@@ -261,6 +261,116 @@
                                HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,20,12"
                                IsHitTestVisible="False"/>
 
+                    <!-- 批注模式的点击捕获层：只在批注模式下 Visible，收起时完全不参与命中测试。
+                         它的作用是"吃掉"点击，让对象不被选中/拖动，也不让 SlideBG_Click 开始框选；
+                         不用改 SlideBG_Click 的判断条件，那会把原有交互搅进来（风险 R2）。 -->
+                    <Rectangle x:Name="FeedbackClickCatcher" Fill="Transparent" Cursor="Cross"
+                               Visibility="{Binding Feedback.IsAnnotating, Converter={StaticResource BoolToVis}}"
+                               MouseLeftButtonDown="FeedbackCatcher_Click"/>
+
+                    <!-- 批注层：挂在 SlideSurface 内部 = 1280×720 逻辑坐标，Viewbox 缩放时不可能漂移。
+                         排在对象之后 → 永远画在最上层、永不被对象遮挡（PRD FB-P0-04）。
+                         ItemsPanel 是 Canvas 且没设 Background（= null）：空白处不参与命中测试，
+                         点击直接穿透给下面的对象（这是"批注层不吃画布事件"的关键，别给它加背景）。 -->
+                    <ItemsControl x:Name="FeedbackNotes" ItemsSource="{Binding Feedback.Notes}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="Canvas.Left" Value="{Binding Left}"/>
+                                <Setter Property="Canvas.Top" Value="{Binding Top}"/>
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <!-- 一个 Border + 一个 TextBox 同时承担"显示"和"编辑"：
+                                     换成 TextBlock↔TextBox 两种控件会让高度/光标/焦点来回跳。 -->
+                                <Border x:Name="NoteBox" CornerRadius="4" Padding="6" Tag="{Binding}"
+                                        Width="{Binding BoxWidth}" MinHeight="20"
+                                        Background="{StaticResource FeedbackRedSoftBrush}"
+                                        BorderBrush="{StaticResource FeedbackRedBorderBrush}"
+                                        BorderThickness="1"
+                                        MouseLeftButtonDown="NoteBox_Click"
+                                        MouseMove="NoteBox_Move"
+                                        MouseLeftButtonUp="NoteBox_Up">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Style.Triggers>
+                                                <!-- 编辑中：边框加粗到 2px（PRD §5.1） -->
+                                                <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                    <Setter Property="BorderThickness" Value="2"/>
+                                                </DataTrigger>
+                                                <!-- 跳转闪烁：4px → 2px，0.6 秒 -->
+                                                <DataTrigger Binding="{Binding IsFlashing}" Value="True">
+                                                    <DataTrigger.EnterActions>
+                                                        <BeginStoryboard>
+                                                            <Storyboard>
+                                                                <ThicknessAnimation Storyboard.TargetProperty="BorderThickness"
+                                                                                    From="4" To="2" Duration="0:0:0.6"/>
+                                                            </Storyboard>
+                                                        </BeginStoryboard>
+                                                    </DataTrigger.EnterActions>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+
+                                    <Grid>
+                                        <TextBox x:Name="NoteText"
+                                                 Text="{Binding DraftText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsReadOnly}"
+                                                 AcceptsReturn="True" TextWrapping="Wrap"
+                                                 Background="Transparent" BorderThickness="0" Padding="0" MinHeight="32"
+                                                 VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"
+                                                 Foreground="{StaticResource FeedbackRedBrush}"
+                                                 CaretBrush="{StaticResource FeedbackRedBrush}"
+                                                 FontSize="24" FontWeight="Medium"
+                                                 TextOptions.TextFormattingMode="Display"
+                                                 LostKeyboardFocus="NoteText_LostFocus"
+                                                 PreviewKeyDown="NoteText_PreviewKeyDown">
+                                            <TextBox.Style>
+                                                <Style TargetType="TextBox">
+                                                    <!-- 没在编辑时不参与命中测试：点击落到 Border 上（单击即进编辑），
+                                                         也避免只读 TextBox 抢焦点、吞掉点击。
+                                                         Focusable 一起关：编辑结束时焦点会自动离开输入框，
+                                                         否则它会带着焦点留在"显示态"，后续按键写进一个不再提交的草稿。 -->
+                                                    <Setter Property="IsHitTestVisible" Value="False"/>
+                                                    <Setter Property="Focusable" Value="False"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                            <Setter Property="IsHitTestVisible" Value="True"/>
+                                                            <Setter Property="Focusable" Value="True"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBox.Style>
+                                        </TextBox>
+
+                                        <!-- ✕：编辑中或 hover 时出现在右上角 -->
+                                        <TextBlock x:Name="CloseMark" Text="✕" FontSize="11" Opacity="0.8"
+                                                   Foreground="{StaticResource FeedbackRedBrush}" Cursor="Hand"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-2,0"
+                                                   Visibility="Collapsed"
+                                                   MouseLeftButtonDown="NoteClose_Click"/>
+                                    </Grid>
+                                </Border>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                        <Setter TargetName="CloseMark" Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                    <Trigger SourceName="NoteBox" Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="CloseMark" Property="Visibility" Value="Visible"/>
+                                    </Trigger>
+                                    <!-- 放在最后：只读时即使 hover 也不显示 ✕（点了也不会生效，不给假承诺） -->
+                                    <DataTrigger Binding="{Binding IsReadOnly}" Value="True">
+                                        <Setter TargetName="CloseMark" Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
                     <!-- 框选矩形：在空白处按下拖动时显示，只在选中判断时用到它的范围 -->
                     <Rectangle x:Name="RubberBand" Visibility="Collapsed" IsHitTestVisible="False"
                                HorizontalAlignment="Left" VerticalAlignment="Top"
@@ -268,6 +378,14 @@
                                StrokeDashArray="4,3"/>
                 </Grid>
             </Viewbox>
+
+            <!-- 批注模式提示条：浮在画布顶部，不占布局高度、不参与命中测试 -->
+            <Border VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,4,0,0"
+                    Background="#CC000000" CornerRadius="10" Padding="10,4"
+                    Visibility="{Binding Feedback.IsAnnotating, Converter={StaticResource BoolToVis}}"
+                    IsHitTestVisible="False">
+                <TextBlock Text="批注模式 · 在幻灯片上点一下写反馈 · Esc 退出" Foreground="White" FontSize="11"/>
+            </Border>
 
             <!-- 底部提示条 -->
             <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,18"

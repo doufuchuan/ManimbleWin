@@ -197,6 +197,8 @@
                 <MenuItem Header="新建终端" Command="{Binding MenuCommand}" CommandParameter="NewTerminal"/>
                 <Separator/>
                 <MenuItem Header="显示/隐藏幻灯片导航器" IsCheckable="True" IsChecked="{Binding NavigatorVisible}" InputGestureText="Alt+Ctrl+N"/>
+                <!-- 与格式栏「反馈」按钮同一条 MenuCommand + 同一个参数：窄窗口按钮被收掉时靠它进来 -->
+                <MenuItem Header="反馈" Command="{Binding MenuCommand}" CommandParameter="ViewFeedback" InputGestureText="Alt+Shift+Ctrl+F"/>
                 <MenuItem Header="显示/隐藏检查器与代码" IsCheckable="True" IsChecked="{Binding InspectorVisible}" InputGestureText="Alt+Ctrl+I"/>
             </MenuItem>
             <MenuItem Header="播放">
@@ -721,10 +723,16 @@
                             </Button.Style>
                             <TextBlock Text="脚本" FontSize="11"/>
                         </Button>
-                        <Button Command="{Binding MenuCommand}" CommandParameter="ViewFeedback" ToolTip="查看反馈（暂未支持，后续版本提供）">
+                        <Button Command="{Binding MenuCommand}" CommandParameter="ViewFeedback"
+                                IsEnabled="{Binding HasDeck}" ToolTipService.ShowOnDisabled="True">
                             <Button.Style>
                                 <Style TargetType="Button" BasedOn="{StaticResource ToolTextButton}">
+                                    <!-- 没有 deck 时按钮禁用，hover 文案要说清楚原因（PRD FB-P0-02） -->
+                                    <Setter Property="ToolTip" Value="反馈：在幻灯片上点一下写红字批注，只在编辑时可见（Alt+Shift+Ctrl+F）"/>
                                     <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasDeck}" Value="False">
+                                            <Setter Property="ToolTip" Value="先打开演示文稿"/>
+                                        </DataTrigger>
                                         <DataTrigger Value="True">
                                             <DataTrigger.Binding>
                                                 <Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=Window}"
@@ -735,7 +743,17 @@
                                     </Style.Triggers>
                                 </Style>
                             </Button.Style>
-                            <TextBlock Text="反馈" FontSize="11"/>
+                            <!-- 角标做成"文字后面的小胶囊"，不用 Adorner、不用负 margin：
+                                 格式栏在 ScrollViewer 里，超出按钮边界的装饰会被裁掉（架构 §6.3） -->
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="反馈" FontSize="11" VerticalAlignment="Center"/>
+                                <Border Margin="4,0,0,0" MinWidth="14" Height="14" CornerRadius="7" Padding="4,0"
+                                        Background="{StaticResource FeedbackRedBrush}"
+                                        Visibility="{Binding Feedback.HasBadge, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding Feedback.BadgeText}" FontSize="9" FontWeight="Bold"
+                                               Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </StackPanel>
                         </Button>
                     </StackPanel>
                 </ScrollViewer>
@@ -810,19 +828,30 @@
                 <!-- 终端只在抽屉的「终端 1」标签里出现，不再单独占用中栏底部一整行 -->
             </Grid>
 
+            <!-- 分隔条：检查器 或 反馈面板 任一可见就显示（两者共用 InspectorWidth） -->
             <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext"
-                          Visibility="{Binding InspectorVisible, Converter={StaticResource BoolToVis}}"/>
+                          Visibility="{Binding RightPaneVisible, Converter={StaticResource BoolToVis}}"/>
 
-            <!-- 右侧：Inspector + Source -->
-            <Grid Grid.Column="4" Visibility="{Binding InspectorVisible, Converter={StaticResource BoolToVis}}">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="{Binding SourceHeight, Mode=TwoWay}"/>
-                </Grid.RowDefinitions>
-                <views:InspectorPanel Grid.Row="0"/>
-                <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="Transparent" ResizeBehavior="PreviousAndNext"/>
-                <views:SourcePanel Grid.Row="2"/>
+            <!-- 右栏 = 互斥槽位：检查器+代码 / 反馈面板。这一层顺带给下一轮的演示脚本面板留了位置。
+                 互斥由派生可见性保证（InspectorPaneVisible = InspectorVisible && !FeedbackVisible），
+                 两个面板都只是 Collapsed，不卸载 → 选中对象/滚动位置/属性状态原地保留。 -->
+            <Grid Grid.Column="4" Visibility="{Binding RightPaneVisible, Converter={StaticResource BoolToVis}}">
+
+                <!-- ① 检查器 + 代码：只多包一层 Grid 加可见性，内部一行不动 -->
+                <Grid Visibility="{Binding InspectorPaneVisible, Converter={StaticResource BoolToVis}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="{Binding SourceHeight, Mode=TwoWay}"/>
+                    </Grid.RowDefinitions>
+                    <views:InspectorPanel Grid.Row="0"/>
+                    <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="Transparent" ResizeBehavior="PreviousAndNext"/>
+                    <views:SourcePanel Grid.Row="2"/>
+                </Grid>
+
+                <!-- ② 反馈面板：DataContext 必须是 FeedbackViewModel（面板内绑定不带 Feedback. 前缀） -->
+                <views:FeedbackPanel DataContext="{Binding Feedback}"
+                                     Visibility="{Binding IsPanelOpen, Converter={StaticResource BoolToVis}}"/>
             </Grid>
         </Grid>
 
