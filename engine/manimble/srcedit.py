@@ -2008,6 +2008,18 @@ class Planner:
             edits.append(remove_kwargs(ksrc, c, kws))
         return edits
 
+    def plan_drop_arg(self, obj: dict, name: str) -> list[Edit]:
+        """Remove one keyword argument from the call that supplies it (back to the default)."""
+        last = len(obj["frames"]) - 1
+        t = locate(self.p, obj["frames"], 0, name, None, resolve_globals=False)
+        if t.kind != "node" or t.frame_index != last:
+            return []
+        kw = t.src.parent.get(t.node)
+        c = t.src.parent.get(kw) if isinstance(kw, ast.keyword) else None
+        if not isinstance(c, ast.Call):
+            return []
+        return [remove_kwargs(t.src, c, {kw})]
+
     def plan_size(self, obj: dict, w: float | None, h: float | None) -> list[tuple[str, list[Edit]]]:
         """Width and/or height in manim units, independently (stretching when both are given)."""
         attempts: list[tuple[str, list[Edit]]] = []

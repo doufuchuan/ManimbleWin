@@ -25,6 +25,12 @@
     <conv:EnumToVisibilityConverter x:Key="KindIsTex" Target="Tex"/>
     <conv:EnumToVisibilityConverter x:Key="KindIsNotTex" Target="Tex" Invert="True"/>
     <conv:EnumToVisibilityConverter x:Key="KindIsImage" Target="Image"/>
+    <!-- 格式栏：合并「基础提示 + 禁用原因」、取色弹层当前色描边/小勾、色条画笔 -->
+    <conv:FormatTipConverter x:Key="FormatTip"/>
+    <conv:SwatchRingConverter x:Key="SwatchRing"/>
+    <conv:SwatchTickConverter x:Key="SwatchTick"/>
+    <conv:ColorStripBrushConverter x:Key="ColorStrip"/>
+    <conv:NumberLessThanConverter x:Key="NumLessThan"/>
 
     <!-- 工具栏图标按钮 -->
     <Style x:Key="ToolIconButton" TargetType="Button">
@@ -405,5 +411,118 @@
         <Setter Property="FontSize" Value="11.5"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <!-- ================= 格式栏（Home bar）控件样式 =================
+         只新增，不改既有的 ToolIconButton：那个样式还被主工具栏的十几个按钮用着，
+         改动它的按下/禁用态会波及所有工具栏。 -->
+
+    <!--
+        B / I / U / S / x² / x₂ / 列表 / 编号 / 段落对齐：带按下态的图标按钮。
+        按下态的强调色是用一层 12% 不透明度的 accent 叠上去做的，而不是直接给 Background
+        设「带 alpha 的 accent 值」——后者必须硬编码色值，主题一换就不对了。
+        图标本身通过 Stroke="{Binding Foreground, RelativeSource=...ToggleButton}" 取色，
+        所以这里只改 Foreground 就能让图标跟着变强调色。
+    -->
+    <Style x:Key="FormatToggleButton" TargetType="ToggleButton">
+        <Setter Property="Width" Value="30"/>
+        <Setter Property="Height" Value="26"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="5" Padding="4">
+                        <Grid>
+                            <Border x:Name="on" Background="{DynamicResource AccentBrush}" Opacity="0" CornerRadius="5"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="on" Property="Opacity" Value="0.12"/>
+                            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <!-- 禁用态：整组 30% 不透明度 + 箭头光标（PRD 5.1）；点击无效由 IsEnabled 保证 -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.3"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 取色按钮（H / A）：尺寸与 ToggleButton 一致，底部 3px 色条由调用方填内容 -->
+    <Style x:Key="FormatPickButton" TargetType="Button">
+        <Setter Property="Width" Value="30"/>
+        <Setter Property="Height" Value="26"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="5" Padding="3">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.3"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 行距 / 分栏下拉：与既有字体字号 ComboBox 同高同字号，避免格式栏整体变高 -->
+    <Style x:Key="FormatDropDown" TargetType="ComboBox">
+        <Setter Property="Height" Value="24"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Padding" Value="4,0"/>
+    </Style>
+
+    <!-- 取色弹层里的一个色块：外描边由 SwatchRing 决定（命中当前色才是强调色）。
+         色块保持可聚焦：PRD 5.2 要求弹层里能用 Tab 在色块间移动、Enter 确认。 -->
+    <Style x:Key="SwatchButton" TargetType="Button">
+        <Setter Property="Width" Value="24"/>
+        <Setter Property="Height" Value="24"/>
+        <Setter Property="Margin" Value="3"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ring" CornerRadius="4" BorderThickness="2"
+                            BorderBrush="{TemplateBinding BorderBrush}" Padding="2">
+                        <Border x:Name="fill" CornerRadius="3" Background="{TemplateBinding Background}" BorderThickness="1"
+                                BorderBrush="{DynamicResource SeparatorBrush}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ring" Property="Opacity" Value="0.8"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 </ResourceDictionary>

@@ -236,6 +236,8 @@ namespace ManimbleWin.ViewModels
             RaisePropertyChanged(nameof(SelectionSummary));
             RaisePropertyChanged(nameof(StatusBarText));
             RebuildSourceLines();
+            // 换选中对象时格式栏的灯必须立刻跟着换，不能残留上一个对象的状态
+            RaiseFormatStateChanged();
         }
 
         /// <summary>框选：矩形与对象包围盒相交即选中（只要沾到就算，符合大多数演示软件的手感）。</summary>
@@ -1337,8 +1339,8 @@ namespace ManimbleWin.ViewModels
             });
             SelectObjectCommand = new RelayCommand(p => { if (p is CanvasObject o) SelectedObject = o; });
             SetThemeCommand = new RelayCommand(p => { if (p is DeckTheme t) ApplyTheme(t); });
-            NudgeCommand = new RelayCommand(p => Nudge(p?.ToString() ?? ""));
-            OpenFindCommand = new RelayCommand(_ => OpenFind(false));
+            NudgeCommand = new RelayCommand(p => Nudge(p?.ToString() ?? ""));            OpenFindCommand = new RelayCommand(_ => OpenFind(false));
+            InitFormatCommands();   // 格式栏命令（见 MainViewModel.Format.cs）
             ConnectEngineCommand = new RelayCommand(_ => _ = ConnectEngine());
             OpenDependencyCenterCommand = new RelayCommand(_ => OpenDependencyCenter(false));
             RenderFormulaCommand = new RelayCommand(p => _ = RenderFormulaInteractive(p?.ToString()));
@@ -2589,7 +2591,7 @@ namespace ManimbleWin.ViewModels
                 case "ExtractImages": _ = ExtractImages(); break;
                 case "InsertTable": InsertObject("Table"); break;
                 case "InsertShape": InsertObject("Rectangle"); break;
-                case "InsertPen": ShowToast("绘制 ▸ 画笔 — 原型模式"); break;
+                case "InsertPen": ShowToast("绘制 ▸ 画笔暂未支持，后续版本提供"); break;
 
                 case "NewSlide": NewSlideFromToolbar(); break;
                 case "DuplicateSlide": DuplicateSlide(); break;
@@ -2601,6 +2603,17 @@ namespace ManimbleWin.ViewModels
                 case "Bold": ToggleFormat("Bold"); break;
                 case "Italic": ToggleFormat("Italic"); break;
                 case "Underline": ToggleFormat("Underline"); break;
+                // 菜单与格式栏共用同一批命令：else 分支里的「原型模式」toast 全部消失
+                case "Strike": ToggleFormat("Strike"); break;
+                case "BulletedList": ToggleFormat("BulletedList"); break;
+                case "NumberedList": ToggleFormat("NumberedList"); break;
+                case "Superscript": ToggleFormat("Superscript"); break;
+                case "Subscript": ToggleFormat("Subscript"); break;
+                case "Indent": ToggleFormat("Indent"); break;
+                case "Outdent": ToggleFormat("Outdent"); break;
+                case "ClearFormat": ToggleFormat("ClearFormat"); break;
+                case "Highlight": ToggleColorPicker("highlight"); break;
+                case "Color": ToggleColorPicker("color"); break;
                 case "Theme": OpenThemePicker(); break;
                 case "SlideSetup": OpenSlideSetup(); break;
                 case "AlignLeft": _ = AlignSelectionAsync("left"); break;
@@ -2646,6 +2659,10 @@ namespace ManimbleWin.ViewModels
 
                 case "Docs": ShowToast("文档：pachterlab.github.io/Manimble"); break;
                 case "About": ShowToast("ManimbleWin — 界面原型 0.5.0"); break;
+                // 格式栏的「脚本」「反馈」两个死链：文案不再说「原型模式」，
+                // 免得用户以为点了只是演示（PRD FMT-P2-04）
+                case "Script": ShowToast("脚本暂未支持，后续版本提供"); break;
+                case "ViewFeedback": ShowToast("查看反馈暂未支持，后续版本提供"); break;
                 case "Insert": InsertObject("Text"); break;
                 default: if (!string.IsNullOrEmpty(action)) ShowToast(action + " — 原型模式"); break;
             }
@@ -2672,17 +2689,12 @@ namespace ManimbleWin.ViewModels
             ShowToast("幻灯片已移动");
         }
 
-        private void ToggleFormat(string prop)
-        {
-            if (SelectedObject == null) { ShowToast("请先选择一个文本对象"); return; }
-            switch (prop)
-            {
-                case "Bold": SelectedObject.Bold = !SelectedObject.Bold; break;
-                case "Italic": SelectedObject.Italic = !SelectedObject.Italic; break;
-                case "Underline": SelectedObject.Underline = !SelectedObject.Underline; break;
-            }
-            ShowToast(prop + " 已切换");
-        }
+        /// <summary>
+        /// 格式菜单 / 快捷键的统一入口（保留旧方法名，菜单参数不变）。
+        /// 真正的实现搬到 Format 通道：本地翻转字段的旧行为已删 —— 只翻字段不改源码，
+        /// 会造成"看着变了但导出没变"，正是本次要修的那个缺陷。
+        /// </summary>
+        private void ToggleFormat(string prop) => FormatToggleCommand?.Execute(prop);
 
         #endregion
 
@@ -2696,6 +2708,8 @@ namespace ManimbleWin.ViewModels
             RaisePropertyChanged(nameof(UseRealRender));
             RaisePropertyChanged(nameof(StatusBarText));
             RebuildSourceLines();
+            // 引擎刷新把格式状态一起换新了（含引擎连接成功这一次），灯要按新数据重算
+            RaiseFormatStateChanged();
         }
 
         /// <summary>

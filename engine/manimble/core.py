@@ -1330,7 +1330,12 @@ class Manimble:
                     label = "line spacing"
                     if obj["kind"] != "text":
                         return {"ok": False, "error": "line spacing applies to text"}
-                    attempts = [(label, self.planner.plan_arg(obj, "line_spacing", fmt(float(req["value"]), 2), outermost=True))]
+                    if req.get("value") is None:
+                        # no value = back to the default spacing: drop the argument instead of writing one
+                        label = "line spacing (default)"
+                        attempts = [(label, self.planner.plan_drop_arg(obj, "line_spacing"))]
+                    else:
+                        attempts = [(label, self.planner.plan_arg(obj, "line_spacing", fmt(float(req["value"]), 2), outermost=True))]
                 elif op == "clear_format":
                     label = "clear formatting"
                     attempts = [(label, self.planner.plan_clear_format(obj))]

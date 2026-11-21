@@ -25,6 +25,8 @@ namespace ManimbleWin
         {
             InitializeComponent();
             PreviewKeyDown += MainWindow_PreviewKeyDown;
+            // 取色弹层用 StaysOpen=True，点弹层外面要自己关（PRD 说的"兜底"）。
+            PreviewMouseDown += MainWindow_PreviewMouseDown;
 
             // DataContext 由 XAML 里的 <Window.DataContext> 建立，可能早于构造函数返回；
             // 两条路都试一次，用 _hooksRegistered 保证只注册一遍。
@@ -189,6 +191,41 @@ namespace ManimbleWin
 
         #endregion
 
+        /// <summary>
+        /// 点窗口别处关闭取色弹层。
+        /// <para>判定只看两件事：点在弹层内容里，还是点在触发它的那个按钮上 —— 后者交给
+        /// <c>FormatPickerToggleCommand</c> 自己取反，这里再关一次会让"再点按钮关闭"变成"关了又开"。</para>
+        /// <para>弹层内容在独立的可视树里（PopupRoot），所以"是否点在弹层里"是**从点击源往上找**
+        /// 弹层的 Child，而不是从弹层往下找。</para>
+        /// </summary>
+        private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (!(DataContext is MainViewModel vm)) return;
+            if (!vm.IsHighlightPickerOpen && !vm.IsColorPickerOpen) return;
+
+            var src = e.OriginalSource as DependencyObject;
+            if (IsWithin(src, HighlightPickerPopup.Child as DependencyObject)) return;
+            if (IsWithin(src, ColorPickerPopup.Child as DependencyObject)) return;
+            if (IsWithin(src, HighlightButton)) return;
+            if (IsWithin(src, ColorButton)) return;
+
+            vm.CloseColorPickers();
+        }
+
+        /// <summary>从 <paramref name="node"/> 沿可视树（必要时退化到逻辑树）往上找 <paramref name="root"/>。</summary>
+        private static bool IsWithin(DependencyObject node, DependencyObject root)
+        {
+            if (root == null) return false;
+            while (node != null)
+            {
+                if (ReferenceEquals(node, root)) return true;
+                node = node is System.Windows.Media.Visual || node is System.Windows.Media.Media3D.Visual3D
+                    ? System.Windows.Media.VisualTreeHelper.GetParent(node)
+                    : LogicalTreeHelper.GetParent(node);
+            }
+            return false;
+        }
+
         private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
         {
             if (!(DataContext is MainViewModel vm)) return;
@@ -231,6 +268,12 @@ namespace ManimbleWin
                     case Key.L: vm.MenuCommand.Execute("AlignLeft"); e.Handled = true; return;
                     case Key.E: vm.MenuCommand.Execute("AlignCenter"); e.Handled = true; return;
                     case Key.R: vm.MenuCommand.Execute("AlignRight"); e.Handled = true; return;
+                    // Ctrl+B/I/U 走格式通道（真正的引擎 edit，不再是本地翻字段）。
+                    // 这几条必须留在上面那条 TextBoxBase 守卫之后：代码窗格是 RichTextBox，
+                    // 在它里面按 Ctrl+B 应该执行编辑器自己的加粗，不能被窗口抢走。
+                    case Key.B: vm.FormatToggleCommand.Execute("Bold"); e.Handled = true; return;
+                    case Key.I: vm.FormatToggleCommand.Execute("Italic"); e.Handled = true; return;
+                    case Key.U: vm.FormatToggleCommand.Execute("Underline"); e.Handled = true; return;
                 }
             }
             if (mods == (ModifierKeys.Control | ModifierKeys.Shift))
@@ -240,6 +283,8 @@ namespace ManimbleWin
                     case Key.G: vm.MenuCommand.Execute("Ungroup"); e.Handled = true; return;
                     case Key.F: vm.MenuCommand.Execute("Front"); e.Handled = true; return;
                     case Key.B: vm.MenuCommand.Execute("Back"); e.Handled = true; return;
+                    case Key.OemPeriod: vm.FormatFontStepCommand.Execute("up"); e.Handled = true; return;
+                    case Key.OemComma: vm.FormatFontStepCommand.Execute("down"); e.Handled = true; return;
                 }
             }
 
@@ -253,6 +298,8 @@ namespace ManimbleWin
                     }
                     break;
                 case Key.Escape:
+                    // 取色弹层先关（它的优先级高于清空选区，否则用户按 Esc 会连带丢掉选中）
+                    if (vm.IsHighlightPickerOpen || vm.IsColorPickerOpen) { vm.CloseColorPickers(); e.Handled = true; break; }
                     if (vm.Find != null && vm.Find.IsOpen) { vm.Find.Close(); e.Handled = true; break; }
                     if (vm.TerminalVisible) { vm.TerminalVisible = false; e.Handled = true; break; }
                     if (InfoBar.Visibility == Visibility.Visible) { InfoBar.Visibility = Visibility.Collapsed; e.Handled = true; break; }
@@ -301,5 +348,65 @@ namespace ManimbleWin
             if (DataContext is MainViewModel vm && e.AddedItems[0] is ManimbleWin.Models.DeckTheme theme)
                 vm.SelectThemeFromUi(theme);
         }
+
+        #region 格式栏的提交时机
+
+        // 字体 / 字号是「可编辑 ComboBox + 回车/失焦提交」：
+        // 不能在 Text 绑定上加 UpdateSourceTrigger=PropertyChanged —— 那样每敲一个字符就会写一次源码，
+        // 中间态（"1"、"12"）会被引擎真的落进 font_size。
+
+        private void FontFamilyBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Enter) return;
+            CommitFontFamily();
+            e.Handled = true;
+        }
+
+        private void FontFamilyBox_LostFocus(object sender, RoutedEventArgs e) => CommitFontFamily();
+
+        private void CommitFontFamily()
+        {
+            if (DataContext is MainViewModel vm && FontFamilyBox != null)
+                vm.FormatFontFamilyCommand.Execute(FontFamilyBox.Text);
+        }
+
+        private void FontSizeBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Enter) return;
+            CommitFontSize();
+            e.Handled = true;
+        }
+
+        private void FontSizeBox_LostFocus(object sender, RoutedEventArgs e) => CommitFontSize();
+
+        private void CommitFontSize()
+        {
+            if (DataContext is MainViewModel vm && FontSizeBox != null)
+                vm.FormatFontSizeCommand.Execute(FontSizeBox.Text);
+        }
+
+        /// <summary>
+        /// 行距 / 分栏下拉：选中项是 OneWay 绑定的回填值，所以程序化更新也会触发 SelectionChanged。
+        /// 用「选中的就是当前值」做去重，避免回填时又发一次格式请求（否则会一直互相触发）。
+        /// </summary>
+        private void LineSpacingBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!(DataContext is MainViewModel vm)) return;
+            if (e.AddedItems.Count == 0) return;
+            string picked = e.AddedItems[0] as string;
+            if (string.IsNullOrEmpty(picked) || picked == vm.FormatLineSpacingText) return;
+            vm.FormatLineSpacingCommand.Execute(picked);
+        }
+
+        private void ColumnsBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!(DataContext is MainViewModel vm)) return;
+            if (e.AddedItems.Count == 0) return;
+            string picked = e.AddedItems[0] as string;
+            if (string.IsNullOrEmpty(picked) || picked == vm.FormatColumnsText) return;
+            vm.FormatColumnsCommand.Execute(picked);
+        }
+
+        #endregion
     }
 }

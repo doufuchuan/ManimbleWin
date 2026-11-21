@@ -131,9 +131,19 @@
                 <MenuItem Header="下移幻灯片" Command="{Binding MenuCommand}" CommandParameter="MoveSlideDown" InputGestureText="Ctrl+Alt+↓"/>
             </MenuItem>
             <MenuItem Header="格式">
-                <MenuItem Header="粗体" Command="{Binding MenuCommand}" CommandParameter="Bold" InputGestureText="Ctrl+B"/>
-                <MenuItem Header="斜体" Command="{Binding MenuCommand}" CommandParameter="Italic" InputGestureText="Ctrl+I"/>
-                <MenuItem Header="下划线" Command="{Binding MenuCommand}" CommandParameter="Underline" InputGestureText="Ctrl+U"/>
+                <!-- 勾选态只由引擎回填的 SelectedObject 决定（Mode=OneWay），菜单自己不记状态；
+                     命令走与格式栏同一条通道（FormatToggleCommand），不另开一条分支。
+                     IsEnabled 必须与格式栏按钮同一条规则：IsCheckable 的 MenuItem 点下去会先本地翻转
+                     勾选态，若命令因不可格式化而静默返回，勾选态就会与引擎真值脱钩（禁点才是对的）。 -->
+                <MenuItem Header="粗体" IsCheckable="True" IsChecked="{Binding FormatBold, Mode=OneWay}"
+                          IsEnabled="{Binding CanFormatWeight}"
+                          Command="{Binding FormatToggleCommand}" CommandParameter="Bold" InputGestureText="Ctrl+B"/>
+                <MenuItem Header="斜体" IsCheckable="True" IsChecked="{Binding FormatItalic, Mode=OneWay}"
+                          IsEnabled="{Binding CanFormatWeight}"
+                          Command="{Binding FormatToggleCommand}" CommandParameter="Italic" InputGestureText="Ctrl+I"/>
+                <MenuItem Header="下划线" IsCheckable="True" IsChecked="{Binding FormatUnderline, Mode=OneWay}"
+                          IsEnabled="{Binding CanFormatCharacter}"
+                          Command="{Binding FormatToggleCommand}" CommandParameter="Underline" InputGestureText="Ctrl+U"/>
                 <Separator/>
                 <MenuItem Header="左对齐" Command="{Binding MenuCommand}" CommandParameter="AlignLeft" InputGestureText="Ctrl+L"/>
                 <MenuItem Header="居中对齐" Command="{Binding MenuCommand}" CommandParameter="AlignCenter" InputGestureText="Ctrl+E"/>
@@ -353,101 +363,384 @@
             </Grid>
         </Border>
 
-        <!-- ====== Home 格式栏 ====== -->
+        <!-- ====== Home 格式栏 ======
+             分组：字体｜字重｜上下标｜颜色｜清除｜列表缩进｜段落对齐｜行距分栏｜视图｜死链
+             每个格式控件的禁用态都绑同一个判定（CanFormat*），hover 原因来自 FormatHint*，
+             两个值由 FormatTip 转换器合成一段 ToolTip —— 文案只在 ViewModel 里写一次。 -->
         <Border Grid.Row="3" Background="{DynamicResource BarBackgroundBrush}" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}" Padding="8,4">
             <Grid>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                <!-- 窄窗口时把右侧的「脚本/反馈」先收掉，其余控件保持常显；确实还放不下就整体裁切，
+                     绝不让格式栏溢出到右端的查找框下面。 -->
+                <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" HorizontalAlignment="Left">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
 
-                    <!-- 字体 / 字号 -->
-                    <ComboBox Text="{Binding SelectedObject.Font, Mode=OneWay}" IsEditable="True" Width="120" Height="24" FontSize="11"
-                              ToolTip="字体" VerticalContentAlignment="Center">
-                        <ComboBoxItem Content="DejaVu Sans"/>
-                        <ComboBoxItem Content="Segoe UI"/>
-                        <ComboBoxItem Content="Georgia"/>
-                        <ComboBoxItem Content="Cambria Math"/>
-                        <ComboBoxItem Content="Consolas"/>
-                    </ComboBox>
-                    <ComboBox Text="{Binding SelectedObject.FontSize, Mode=OneWay}" IsEditable="True" Width="52" Height="24" FontSize="11"
-                              ToolTip="字号" Margin="4,0,0,0" VerticalContentAlignment="Center">
-                        <ComboBoxItem Content="18"/>
-                        <ComboBoxItem Content="24"/>
-                        <ComboBoxItem Content="28"/>
-                        <ComboBoxItem Content="40"/>
-                        <ComboBoxItem Content="56"/>
-                        <ComboBoxItem Content="72"/>
-                    </ComboBox>
+                        <!-- 字体 / 字号 -->
+                        <ComboBox x:Name="FontFamilyBox" ItemsSource="{Binding FontFamilyItems}" IsEditable="True"
+                                  Width="110" Height="24" FontSize="11"
+                                  Text="{Binding FormatFontFamily, Mode=OneWay}"
+                                  IsEnabled="{Binding CanFormatTextOnly}"
+                                  ToolTipService.ShowOnDisabled="True"
+                                  VerticalContentAlignment="Center"
+                                  KeyDown="FontFamilyBox_KeyDown" LostFocus="FontFamilyBox_LostFocus">
+                            <ComboBox.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="字体"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ComboBox.ToolTip>
+                        </ComboBox>
+                        <ComboBox x:Name="FontSizeBox" ItemsSource="{Binding FontSizeItems}" IsEditable="True"
+                                  Width="46" Height="24" FontSize="11" Margin="4,0,0,0"
+                                  Text="{Binding FormatFontSizeText, Mode=OneWay}"
+                                  IsEnabled="{Binding CanFormatTextOnly}"
+                                  ToolTipService.ShowOnDisabled="True"
+                                  VerticalContentAlignment="Center"
+                                  KeyDown="FontSizeBox_KeyDown" LostFocus="FontSizeBox_LostFocus">
+                            <ComboBox.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="字号（回车提交）"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ComboBox.ToolTip>
+                        </ComboBox>
+                        <!-- 字号微调：点一次 ×1.1 / ×0.9，与 macOS 版 stepper 手感一致 -->
+                        <StackPanel Margin="2,0,0,0" VerticalAlignment="Center">
+                            <Button Style="{StaticResource FormatPickButton}" Width="14" Height="12" Padding="0"
+                                    Command="{Binding FormatFontStepCommand}" CommandParameter="up"
+                                    IsEnabled="{Binding CanFormatTextOnly}" ToolTip="增大字号 (Ctrl+Shift+.)">
+                                <Path Data="M0,5 L4,1 L8,5" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="7" Height="4"/>
+                            </Button>
+                            <Button Style="{StaticResource FormatPickButton}" Width="14" Height="12" Padding="0" Margin="0,2,0,0"
+                                    Command="{Binding FormatFontStepCommand}" CommandParameter="down"
+                                    IsEnabled="{Binding CanFormatTextOnly}" ToolTip="减小字号 (Ctrl+Shift+,)">
+                                <Path Data="M0,1 L4,5 L8,1" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="7" Height="4"/>
+                            </Button>
+                        </StackPanel>
 
-                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+                        <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
 
-                    <!-- B I U S -->
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Bold" ToolTip="粗体 (Ctrl+B)">
-                        <Path Data="{StaticResource Icon.Bold}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Italic" ToolTip="斜体 (Ctrl+I)">
-                        <Path Data="{StaticResource Icon.Italic}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Underline" ToolTip="下划线 (Ctrl+U)">
-                        <Path Data="{StaticResource Icon.Underline}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Strike" ToolTip="删除线">
-                        <Path Data="{StaticResource Icon.Strike}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
-                    </Button>
+                        <!-- B I U S：字重与倾斜只对 Text 开放（Tex 没有字重参数），下划线/删除线对 Text 与 Tex 都开放 -->
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatBold, Mode=OneWay}"
+                                      IsEnabled="{Binding CanFormatWeight}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="Bold" Tag="粗体 (Ctrl+B)"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="粗体 (Ctrl+B)"/>
+                                    <Binding Path="FormatHintWeight"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <Path Data="{StaticResource Icon.Bold}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                        </ToggleButton>
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatItalic, Mode=OneWay}"
+                                      IsEnabled="{Binding CanFormatWeight}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="Italic"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="斜体 (Ctrl+I)"/>
+                                    <Binding Path="FormatHintWeight"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <Path Data="{StaticResource Icon.Italic}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                        </ToggleButton>
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatUnderline, Mode=OneWay}"
+                                      IsEnabled="{Binding CanFormatCharacter}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="Underline"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="下划线 (Ctrl+U)"/>
+                                    <Binding Path="FormatHintCharacter"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <Path Data="{StaticResource Icon.Underline}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                        </ToggleButton>
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatStrike, Mode=OneWay}"
+                                      IsEnabled="{Binding CanFormatCharacter}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="Strike"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="删除线"/>
+                                    <Binding Path="FormatHintCharacter"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <Path Data="{StaticResource Icon.Strike}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                        </ToggleButton>
 
-                    <!-- 高亮 / 颜色 -->
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Highlight" ToolTip="高亮">
-                        <TextBlock Text="H" FontSize="13" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="Color" ToolTip="字体颜色">
-                        <TextBlock Text="A" FontSize="14" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="Bold"/>
-                    </Button>
+                        <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
 
-                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+                        <!-- 上标 / 下标：纯 Unicode 替换，只对 Text 有意义 -->
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatSuperscript, Mode=OneWay}"
+                                      IsEnabled="{Binding CanFormatTextOnly}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="Superscript"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="上标：把字母和数字换成 Unicode 上标字符（2 → ²）"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <TextBlock Text="x²" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"/>
+                        </ToggleButton>
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatSubscript, Mode=OneWay}"
+                                      IsEnabled="{Binding CanFormatTextOnly}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="Subscript"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="下标：把数字和字母换成 Unicode 下标字符（2 → ₂）"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <TextBlock Text="x₂" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"/>
+                        </ToggleButton>
 
-                    <!-- 列表 / 缩进 -->
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="BulletedList" ToolTip="项目符号列表">
-                        <Path Data="{StaticResource Icon.List}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="NumberedList" ToolTip="编号列表">
-                        <TextBlock Text="1." FontSize="12"/>
-                    </Button>
+                        <!-- 高亮 / 字色：点开取色弹层；底部 3px 色条显示当前值 -->
+                        <Button x:Name="HighlightButton" Style="{StaticResource FormatPickButton}"
+                                Command="{Binding FormatPickerToggleCommand}" CommandParameter="highlight"
+                                IsEnabled="{Binding CanFormatCharacter}"
+                                ToolTipService.ShowOnDisabled="True">
+                            <Button.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="高亮"/>
+                                    <Binding Path="FormatHintCharacter"/>
+                                </MultiBinding>
+                            </Button.ToolTip>
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="3"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="H" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Border Grid.Row="1" CornerRadius="1.5" Margin="1,1,1,0"
+                                        Background="{Binding FormatHighlightColor, Converter={StaticResource ColorStrip}}"
+                                        Visibility="{Binding SelectedObject.HasHighlight, Converter={StaticResource BoolToVis}}"/>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="ColorButton" Style="{StaticResource FormatPickButton}"
+                                Command="{Binding FormatPickerToggleCommand}" CommandParameter="color"
+                                IsEnabled="{Binding CanFormatCharacter}"
+                                ToolTipService.ShowOnDisabled="True">
+                            <Button.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="字体颜色"/>
+                                    <Binding Path="FormatHintCharacter"/>
+                                </MultiBinding>
+                            </Button.ToolTip>
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="3"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="A" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Border Grid.Row="1" CornerRadius="1.5" Margin="1,1,1,0"
+                                        Background="{Binding FormatTextColor, Converter={StaticResource ColorStrip}}"
+                                        Visibility="{Binding FormatTextColor, Converter={StaticResource NullToVis}}"/>
+                            </Grid>
+                        </Button>
 
-                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+                        <!-- 清除格式：一次去掉字重/倾斜/字色/高亮/下划线/删除线/行距/逐段样式 -->
+                        <Button Style="{StaticResource ToolTextButton}" Padding="7,4" Margin="2,0,0,0"
+                                Command="{Binding FormatToggleCommand}" CommandParameter="ClearFormat"
+                                IsEnabled="{Binding CanFormatCharacter}"
+                                ToolTipService.ShowOnDisabled="True">
+                            <Button.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="清除格式（粗体/斜体/字色/高亮/下划线/删除线/行距）"/>
+                                    <Binding Path="FormatHintCharacter"/>
+                                </MultiBinding>
+                            </Button.ToolTip>
+                            <TextBlock Text="清除" FontSize="11"/>
+                        </Button>
 
-                    <!-- 对齐 -->
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="AlignLeft" ToolTip="左对齐">
-                        <Path Data="{StaticResource Icon.AlignLeft}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="AlignCenter" ToolTip="居中对齐">
-                        <Path Data="{StaticResource Icon.AlignCenter}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolIconButton}" Command="{Binding MenuCommand}" CommandParameter="AlignRight" ToolTip="右对齐">
-                        <Path Data="{StaticResource Icon.AlignRight}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
-                    </Button>
+                        <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
 
-                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+                        <!-- 列表 / 缩进 -->
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatBulleted, Mode=OneWay}"
+                                      IsEnabled="{Binding CanFormatTextOnly}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="BulletedList"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="项目符号列表"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <Path Data="{StaticResource Icon.List}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                        </ToggleButton>
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatNumbered, Mode=OneWay}"
+                                      IsEnabled="{Binding CanFormatTextOnly}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="NumberedList"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="编号列表"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <TextBlock Text="1." FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"/>
+                        </ToggleButton>
+                        <Button Style="{StaticResource FormatPickButton}"
+                                Command="{Binding FormatToggleCommand}" CommandParameter="Outdent"
+                                IsEnabled="{Binding CanFormatTextOnly}"
+                                ToolTipService.ShowOnDisabled="True">
+                            <Button.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="减少缩进（每行 −4 空格）"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </Button.ToolTip>
+                            <TextBlock Text="⇤" FontSize="13" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                        </Button>
+                        <Button Style="{StaticResource FormatPickButton}"
+                                Command="{Binding FormatToggleCommand}" CommandParameter="Indent"
+                                IsEnabled="{Binding CanFormatTextOnly}"
+                                ToolTipService.ShowOnDisabled="True">
+                            <Button.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="增加缩进（每行 +4 空格）"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </Button.ToolTip>
+                            <TextBlock Text="⇥" FontSize="13" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                        </Button>
 
-                    <!-- 网格 / 吸附 / 标尺 -->
-                    <ToggleButton Width="30" Height="26" IsChecked="{Binding ShowGrid}" ToolTip="网格线" Foreground="{DynamicResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0" Cursor="Hand">
-                        <Path Data="{StaticResource Icon.Grid}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.2" Stretch="Uniform" Width="14" Height="14"/>
-                    </ToggleButton>
-                    <ToggleButton Width="30" Height="26" IsChecked="{Binding SnapToObjects}" ToolTip="吸附到对象" Foreground="{DynamicResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0" Cursor="Hand">
-                        <TextBlock Text="⊞" FontSize="14"/>
-                    </ToggleButton>
-                    <ToggleButton Width="30" Height="26" IsChecked="{Binding ShowRuler}" ToolTip="标尺" Foreground="{DynamicResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0" Cursor="Hand">
-                        <Path Data="{StaticResource Icon.Ruler}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.2" Stretch="Uniform" Width="14" Height="14"/>
-                    </ToggleButton>
+                        <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
 
-                    <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+                        <!-- 段落对齐（对象对齐在 Arrange 菜单里，参数不同，互不影响） -->
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatParagraphAlign, Mode=OneWay, Converter={StaticResource StrEq}, ConverterParameter=left}"
+                                      IsEnabled="{Binding CanFormatTextOnly}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="AlignLeftPara"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="文本左对齐（对象对齐见「排列」菜单）"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <Path Data="{StaticResource Icon.AlignLeft}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                        </ToggleButton>
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatParagraphAlign, Mode=OneWay, Converter={StaticResource StrEq}, ConverterParameter=center}"
+                                      IsEnabled="{Binding CanFormatTextOnly}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="AlignCenterPara"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="文本居中（对象对齐见「排列」菜单）"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <Path Data="{StaticResource Icon.AlignCenter}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                        </ToggleButton>
+                        <ToggleButton Style="{StaticResource FormatToggleButton}"
+                                      IsChecked="{Binding FormatParagraphAlign, Mode=OneWay, Converter={StaticResource StrEq}, ConverterParameter=right}"
+                                      IsEnabled="{Binding CanFormatTextOnly}"
+                                      Command="{Binding FormatToggleCommand}" CommandParameter="AlignRightPara"
+                                      ToolTipService.ShowOnDisabled="True">
+                            <ToggleButton.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="文本右对齐（对象对齐见「排列」菜单）"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ToggleButton.ToolTip>
+                            <Path Data="{StaticResource Icon.AlignRight}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" StrokeThickness="1.3" Stretch="Uniform" Width="14" Height="14"/>
+                        </ToggleButton>
 
-                    <Button Style="{StaticResource ToolTextButton}" Command="{Binding MenuCommand}" CommandParameter="Script" ToolTip="脚本">
-                        <TextBlock Text="脚本" FontSize="11"/>
-                    </Button>
-                    <Button Style="{StaticResource ToolTextButton}" Command="{Binding MenuCommand}" CommandParameter="ViewFeedback" ToolTip="查看反馈">
-                        <TextBlock Text="反馈" FontSize="11"/>
-                    </Button>
-                </StackPanel>
+                        <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
 
-                <!-- 右侧：查找框 -->
+                        <!-- 行距 / 分栏 -->
+                        <ComboBox x:Name="LineSpacingBox" Style="{StaticResource FormatDropDown}" Width="74"
+                                  ItemsSource="{Binding LineSpacingItems}"
+                                  SelectedItem="{Binding FormatLineSpacingText, Mode=OneWay}"
+                                  IsEnabled="{Binding CanFormatTextOnly}"
+                                  ToolTipService.ShowOnDisabled="True"
+                                  SelectionChanged="LineSpacingBox_SelectionChanged">
+                            <ComboBox.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="行距（「默认」= 去掉 line_spacing）"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ComboBox.ToolTip>
+                        </ComboBox>
+                        <ComboBox x:Name="ColumnsBox" Style="{StaticResource FormatDropDown}" Width="68" Margin="4,0,0,0"
+                                  ItemsSource="{Binding ColumnItems}"
+                                  SelectedItem="{Binding FormatColumnsText, Mode=OneWay}"
+                                  IsEnabled="{Binding CanFormatTextOnly}"
+                                  ToolTipService.ShowOnDisabled="True"
+                                  SelectionChanged="ColumnsBox_SelectionChanged">
+                            <ComboBox.ToolTip>
+                                <MultiBinding Converter="{StaticResource FormatTip}">
+                                    <Binding Source="分栏"/>
+                                    <Binding Path="FormatHintTextOnly"/>
+                                </MultiBinding>
+                            </ComboBox.ToolTip>
+                        </ComboBox>
+
+                        <Border Width="1" Height="20" Background="{DynamicResource SeparatorBrush}" Margin="6,0"/>
+
+                        <!-- 网格 / 吸附 / 标尺（视图开关，与格式无关，永不禁用） -->
+                        <ToggleButton Width="30" Height="26" IsChecked="{Binding ShowGrid}" ToolTip="网格线" Foreground="{DynamicResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0" Cursor="Hand">
+                            <Path Data="{StaticResource Icon.Grid}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.2" Stretch="Uniform" Width="14" Height="14"/>
+                        </ToggleButton>
+                        <ToggleButton Width="30" Height="26" IsChecked="{Binding SnapToObjects}" ToolTip="吸附到对象" Foreground="{DynamicResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0" Cursor="Hand">
+                            <TextBlock Text="⊞" FontSize="14"/>
+                        </ToggleButton>
+                        <ToggleButton Width="30" Height="26" IsChecked="{Binding ShowRuler}" ToolTip="标尺" Foreground="{DynamicResource TextPrimaryBrush}" Background="Transparent" BorderThickness="0" Cursor="Hand">
+                            <Path Data="{StaticResource Icon.Ruler}" Stroke="{DynamicResource TextPrimaryBrush}" StrokeThickness="1.2" Stretch="Uniform" Width="14" Height="14"/>
+                        </ToggleButton>
+
+                        <!-- 脚本 / 反馈：能力未做，文案不再说「原型模式」，避免让用户以为只是演示 -->
+                        <Button Command="{Binding MenuCommand}" CommandParameter="Script" ToolTip="脚本（暂未支持，后续版本提供）">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ToolTextButton}">
+                                    <Style.Triggers>
+                                        <!-- 窗口太窄时先收掉这两个，保证格式控件不被挤掉 -->
+                                        <DataTrigger Value="True">
+                                            <DataTrigger.Binding>
+                                                <Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=Window}"
+                                                         Converter="{StaticResource NumLessThan}" ConverterParameter="1240"/>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <TextBlock Text="脚本" FontSize="11"/>
+                        </Button>
+                        <Button Command="{Binding MenuCommand}" CommandParameter="ViewFeedback" ToolTip="查看反馈（暂未支持，后续版本提供）">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ToolTextButton}">
+                                    <Style.Triggers>
+                                        <DataTrigger Value="True">
+                                            <DataTrigger.Binding>
+                                                <Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=Window}"
+                                                         Converter="{StaticResource NumLessThan}" ConverterParameter="1240"/>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <TextBlock Text="反馈" FontSize="11"/>
+                        </Button>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- 右侧：查找框（固定右端，不被左侧格式控件挤走） -->
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Width="220">
                     <Border Background="{DynamicResource CodeBackgroundBrush}" BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="1" CornerRadius="4" Height="24">
                         <Grid>
@@ -459,6 +752,29 @@
                 </StackPanel>
             </Grid>
         </Border>
+
+        <!-- ====== 取色弹层（高亮 / 字色各一个，内容同一个控件） ======
+             DataContext 必须显式写成 PlacementTarget.DataContext：Popup 不在主可视树里，
+             不继承窗口的 DataContext，省掉这一行弹层里所有绑定都会静默失效。
+             StaysOpen=True + 三路自管关闭（Esc / 再点同一个按钮 / 窗口 PreviewMouseDown 兜底）：
+             StaysOpen=False 会在"点触发按钮"的 mouse-down 阶段先关再被 Click 打开，永远关不掉。 -->
+        <Popup x:Name="HighlightPickerPopup"
+               PlacementTarget="{Binding ElementName=HighlightButton}"
+               Placement="Bottom" VerticalOffset="2" HorizontalOffset="-4"
+               StaysOpen="True" AllowsTransparency="True" PopupAnimation="Fade"
+               IsOpen="{Binding IsHighlightPickerOpen, Mode=TwoWay}"
+               DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+            <views:ColorPickerPopup Mode="Highlight"/>
+        </Popup>
+
+        <Popup x:Name="ColorPickerPopup"
+               PlacementTarget="{Binding ElementName=ColorButton}"
+               Placement="Bottom" VerticalOffset="2" HorizontalOffset="-4"
+               StaysOpen="True" AllowsTransparency="True" PopupAnimation="Fade"
+               IsOpen="{Binding IsColorPickerOpen, Mode=TwoWay}"
+               DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+            <views:ColorPickerPopup Mode="Color"/>
+        </Popup>
 
         <!-- ====== 主体：Navigator | Canvas+Drawer | Inspector+Source ====== -->
         <Grid Grid.Row="4">

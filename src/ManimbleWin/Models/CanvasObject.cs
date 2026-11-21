@@ -19,6 +19,10 @@ namespace ManimbleWin.Models
         private string _color = "#FFFFFF";
         private string _font = "Segoe UI";
         private bool _bold, _italic, _underline, _strike;
+        private string _weight, _slant, _highlightColor, _paragraphAlign;
+        private int _columns = 1;
+        private double? _lineSpacing;
+        private bool _isTextEditable, _hasTextBox;
         private int _z, _sourceLine = 1;
         private double _x, _y, _width, _height;
         private double _rotation;
@@ -55,6 +59,84 @@ namespace ManimbleWin.Models
         public bool Italic { get => _italic; set { _italic = value; Notify(nameof(Italic)); } }
         public bool Underline { get => _underline; set { _underline = value; Notify(nameof(Underline)); } }
         public bool Strike { get => _strike; set { _strike = value; Notify(nameof(Strike)); } }
+
+        // ---- 格式状态（全部由引擎 scene 结果回填，不在本地猜） ----
+        // 这些字段每次刷新都会被重新赋一遍同样的值；不短路的话一次刷新会打出几十条无意义的
+        // PropertyChanged，把整个格式栏的绑定重算一遍。所以 setter 一律先比再赋。
+
+        /// <summary>原始字重字符串（BOLD / SEMIBOLD / NORMAL / null）。保留它只为了排错，按钮看 <see cref="Bold"/>。</summary>
+        public string Weight
+        {
+            get => _weight;
+            set { if (_weight != value) { _weight = value; Notify(nameof(Weight)); } }
+        }
+
+        /// <summary>原始倾斜字符串（ITALIC / OBLIQUE / NORMAL / null）。</summary>
+        public string Slant
+        {
+            get => _slant;
+            set { if (_slant != value) { _slant = value; Notify(nameof(Slant)); } }
+        }
+
+        /// <summary>
+        /// 高亮色。三态：<c>#RRGGBB</c>（有色）、<c>null</c>（无高亮）、<c>"on"</c>（源码有
+        /// <c>add_background_rectangle</c> 但没写颜色字面量）。"on" 不能归一化成 null，
+        /// 否则灯会误灭 —— 那个对象确实有底块。
+        /// </summary>
+        public string HighlightColor
+        {
+            get => _highlightColor;
+            set
+            {
+                if (_highlightColor != value)
+                {
+                    _highlightColor = value;
+                    Notify(nameof(HighlightColor));
+                    Notify(nameof(HasHighlight));
+                }
+            }
+        }
+
+        /// <summary>有底块（不管取不取得到颜色）。</summary>
+        public bool HasHighlight => !string.IsNullOrEmpty(_highlightColor);
+
+        /// <summary>段落对齐（left / center / right / null=源码没写）。只用于对齐三键的灯。</summary>
+        public string ParagraphAlign
+        {
+            get => _paragraphAlign;
+            set { if (_paragraphAlign != value) { _paragraphAlign = value; Notify(nameof(ParagraphAlign)); } }
+        }
+
+        /// <summary>分栏数，引擎默认 1。</summary>
+        public int Columns
+        {
+            get => _columns;
+            set { if (_columns != value) { _columns = value; Notify(nameof(Columns)); } }
+        }
+
+        /// <summary>行距倍数；null = 源码里没有 line_spacing（即引擎默认）。</summary>
+        public double? LineSpacing
+        {
+            get => _lineSpacing;
+            set { if (_lineSpacing != value) { _lineSpacing = value; Notify(nameof(LineSpacing)); } }
+        }
+
+        /// <summary>
+        /// 引擎的 <c>textOk</c>：这个对象的文字能不能用 <c>text</c> op 改写。
+        /// 由辅助函数生成的文本为 false —— 提前拦下比等引擎抛 TypeError 好读。
+        /// </summary>
+        public bool IsTextEditable
+        {
+            get => _isTextEditable;
+            set { if (_isTextEditable != value) { _isTextEditable = value; Notify(nameof(IsTextEditable)); } }
+        }
+
+        /// <summary>有文本框（引擎返回了 frame）。段落对齐要求「多行文本 或 有文本框」，靠它预判。</summary>
+        public bool HasTextBox
+        {
+            get => _hasTextBox;
+            set { if (_hasTextBox != value) { _hasTextBox = value; Notify(nameof(HasTextBox)); } }
+        }
         public int Z { get => _z; set { _z = value; Notify(nameof(Z)); } }
         public int SourceLine { get => _sourceLine; set { _sourceLine = value; Notify(nameof(SourceLine)); } }
         public double X { get => _x; set { _x = value; Notify(nameof(X)); } }

@@ -26,6 +26,16 @@ namespace ManimbleWin.ViewModels
         public string StatusText { get; private set; } = "未连接";
         public event Action<string> Log;
 
+        /// <summary>
+        /// 刷新前快照的选区：oid + loc + kind。
+        /// 存 loc/kind 是为了在 oid 被引擎重新编号时（分栏、对齐这类结构改写）还能认出同一个对象。
+        /// </summary>
+        private readonly List<(string Oid, string Loc, ObjectKind Kind)> _restoreSelection =
+            new List<(string Oid, string Loc, ObjectKind Kind)>();
+
+        /// <summary>快照时的主选中对象 oid；恢复时优先用它，保证多选后"主选中"不跳。</summary>
+        private string _restorePrimaryOid;
+
         /// <summary>引擎 deck 里真实存在的场景名，用来判断某页能否写回引擎。</summary>
         public HashSet<string> EngineScenes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -213,6 +223,9 @@ namespace ManimbleWin.ViewModels
             if (!IsConnected || slide == null) return;
             try
             {
+                // 快照必须早于 Builds.Clear()：那之后旧对象就成了孤儿，
+                // 而格式操作后"选中不丢"完全依赖这份 oid 快照。
+                SnapshotSelectionForRestore(slide);
                 var data = await _engine.Scene(slide.Name);
                 // stops[]: 每个 build 一帧
                 if (data.TryGetProperty("stops", out var stops) && stops.ValueKind == JsonValueKind.Array)
@@ -303,10 +316,14 @@ namespace ManimbleWin.ViewModels
 
             Application.Current.Dispatcher.Invoke(() =>
             {
+                int filled = 0;
                 for (int bi = 0; bi < slide.Builds.Count; bi++)
                 {
                     var build = slide.Builds[bi];
-                    var visible = bi < visibleSets.Count ? visibleSets[bi] : visibleSets[0];
+                    // 先在局部 List 里攒完再一次性赋给 build.Objects。
+                    // 原来逐条 build.Objects.Add(co) 会让 ItemsControl 每加一个都重排一次，
+                    // 一页十几个对象就能看见明显的闪；一次性替换只有一个变更通知。
+                    var list = new List<CanvasObject>(16);
                     foreach (var prop in objects.EnumerateObject())
                     {
                         if (!int.TryParse(prop.Name, out int oid)) continue;
@@ -325,6 +342,8 @@ namespace ManimbleWin.ViewModels
                             SourceLine = ParseLine(GetStr(o, "loc")),
                             IsSelected = false
                         };
+                        // 格式状态回填：灯亮不亮只认引擎给的 weight/slant/format，不在本地记忆。
+                        ApplyFormatFields(co, o);
                         // 用引擎给的包围盒定位点击框；没有几何信息的对象给个居中的最小可点区域。
                         if (bounds.TryGetValue(oid, out var box))
                         {
@@ -340,11 +359,6 @@ namespace ManimbleWin.ViewModels
                             co.Width = 120;
                             co.Height = 40;
                         }
-                        if (co.Kind == ObjectKind.Tex)
-                        {
-                            // 稍后异步请求 sprite 真实渲染
-                            _ = RenderSpriteFor(co);
-                        }
                         if (co.Kind == ObjectKind.Image)
                         {
                             // 引擎 scene 结果对 image 返回 image(文件名) 与 imagePath(绝对路径)，
@@ -352,10 +366,209 @@ namespace ManimbleWin.ViewModels
                             co.ImagePath = GetStr(o, "imagePath") ?? GetStr(o, "image") ?? "";
                             co.ImageLabel = GetStr(o, "image") ?? co.ImageLabel;
                         }
-                        build.Objects.Add(co);
+                        list.Add(co);
                     }
+                    build.Objects = new ObservableCollection<CanvasObject>(list);
+                    // sprite 请求要放在替换之后：替换前起的任务拿到的是马上要被丢掉的对象，
+                    // sprite 回来时那个对象已经不在列表里，图就永远不会显示。
+                    foreach (var co in list)
+                        if (co.Kind == ObjectKind.Tex) _ = RenderSpriteFor(co);
+                    filled = list.Count;
                 }
+                // 选中恢复必须在这一批对象都进列表之后做，否则匹配不到任何 oid。
+                RestoreSelectionByOid(slide);
+                // Objects 是"整体换了一个集合"而不是就地增删，画布的 ItemsControl 不会收到
+                // CollectionChanged，必须让 CurrentObjects 这个派生属性重新通知一次，
+                // 否则画布还绑在上一批（已被丢弃的）集合上 —— 表现为"格式化后画布空白/不刷新"。
+                _vm.RaiseCurrentChanged();
+                if (filled > 0) Say($"已回填 {filled} 个对象的格式状态");
             });
+        }
+
+        /// <summary>
+        /// 把 scene 里单个对象的格式字段读进 <see cref="CanvasObject"/>。
+        /// <para>全程防御：<c>weight</c> / <c>slant</c> / <c>format</c> 都可能缺失或为 null，
+        /// <c>highlight</c> 还可能是字符串 <c>"on"</c>，<c>lineSpacing</c> 可能是 int 也可能是 float。
+        /// 这里一律走既有的 GetStr / GetDouble（后者先判 ValueKind，绕开 .NET 8
+        /// <c>TryGetDouble</c> 对 null 抛异常的坑）。</para>
+        /// </summary>
+        private static void ApplyFormatFields(CanvasObject co, JsonElement o)
+        {
+            if (co == null || o.ValueKind != JsonValueKind.Object) return;
+
+            string weight = GetStr(o, "weight");
+            string slant = GetStr(o, "slant");
+            co.Weight = weight;
+            co.Slant = slant;
+            // 以 weight/slant 的取值集合为准，不读引擎的 bold/italic 布尔：
+            // 两者语义会漂（SEMIBOLD 算不算粗体只有集合能表达），只留一个事实来源。
+            co.Bold = IsBoldWeight(weight);
+            co.Italic = IsItalicSlant(slant);
+
+            // 只有 text / tex 才有 format / textOk / frame 三项，其他 kind 直接跳过。
+            if (o.TryGetProperty("format", out var fmt) && fmt.ValueKind == JsonValueKind.Object)
+            {
+                co.Underline = GetBool(fmt, "underline");
+                co.Strike = GetBool(fmt, "strike");
+
+                // 三态：null（无高亮）/ "#RRGGBB" / "on"（有底块但没写颜色）。
+                // "on" 必须原样保留：归一化成 null 会让灯误灭，而那个对象确实有底块。
+                string hl = GetStr(fmt, "highlight");
+                co.HighlightColor = string.Equals(hl, "on", StringComparison.Ordinal)
+                    ? "on"
+                    : NormalizeHexOrNull(hl);
+
+                string align = GetStr(fmt, "align");
+                co.ParagraphAlign = string.IsNullOrEmpty(align) ? null : align.ToLowerInvariant();
+                co.Columns = Math.Max(1, GetInt(fmt, "columns", 1));
+
+                // lineSpacing 缺失 / null 都表示"源码里没有 line_spacing"，即引擎默认行距。
+                bool hasSpacing = fmt.TryGetProperty("lineSpacing", out var ls) && ls.ValueKind == JsonValueKind.Number
+                                  && ls.TryGetDouble(out _);
+                co.LineSpacing = hasSpacing ? GetDouble(fmt, "lineSpacing", 0) : (double?)null;
+            }
+
+            co.IsTextEditable = GetBool(o, "textOk");
+            // frame 是 [x1, y1, x2, y2] 数组（有文本框时才有），用来预判段落对齐能不能用。
+            co.HasTextBox = o.TryGetProperty("frame", out var fr) && fr.ValueKind == JsonValueKind.Array
+                            && fr.GetArrayLength() >= 4;
+        }
+
+        /// <summary>粗体判定：只有这几个字重算"按钮该亮"（PRD 明确给的集合，与 macOS 一致）。</summary>
+        private static bool IsBoldWeight(string weight)
+        {
+            if (string.IsNullOrEmpty(weight)) return false;
+            switch (weight.ToUpperInvariant())
+            {
+                case "BOLD":
+                case "SEMIBOLD":
+                case "ULTRABOLD":
+                case "HEAVY":
+                case "ULTRAHEAVY":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>斜体判定：ITALIC（真斜体）与 OBLIQUE（伪斜体）都算。</summary>
+        private static bool IsItalicSlant(string slant)
+        {
+            if (string.IsNullOrEmpty(slant)) return false;
+            string s = slant.ToUpperInvariant();
+            return s == "ITALIC" || s == "OBLIQUE";
+        }
+
+        /// <summary>引擎色值归一化：不合法就当没有（null），交给 UI 的"无颜色"分支。</summary>
+        private static string NormalizeHexOrNull(string s)
+        {
+            string hex = FormatPalette.NormalizeHex(s, out bool ok);
+            return ok ? hex : null;
+        }
+
+        /// <summary>
+        /// 快照当前选区，供刷新后的 <see cref="RestoreSelectionByOid"/> 复原。
+        /// <para>为什么存 oid + loc + kind 三件套：纯样式改动不改源码结构，oid 不变；
+        /// 但 <c>columns</c> 会把 Text 包进 VGroup、<c>align</c> 会把 Text 改写成 Paragraph，
+        /// 这两种情况下引擎会重新编号，oid 全变 —— 得靠 loc + kind 兜底。</para>
+        /// </summary>
+        private void SnapshotSelectionForRestore(Slide slide)
+        {
+            _restoreSelection.Clear();
+            _restorePrimaryOid = null;
+            // 只有"正在载入的就是当前页"才谈得上恢复：载入别的页时当前选区跟它无关。
+            if (slide == null || !ReferenceEquals(slide, _vm.CurrentSlide)) return;
+            foreach (var o in _vm.SelectedObjects)
+                if (o != null && !string.IsNullOrEmpty(o.Oid))
+                    _restoreSelection.Add((o.Oid, o.Loc, o.Kind));
+            _restorePrimaryOid = _vm.SelectedObject?.Oid;
+        }
+
+        /// <summary>
+        /// 对象集合替换完成后按 oid 恢复选区；oid 找不到时退化为 loc + kind，再找不到就清空选区。
+        /// <para>为什么不猜：猜错的代价是用户以为选中的是另一个对象，接着点格式就改错了东西，
+        /// 而"选区丢了"至少是可见且可恢复的。</para>
+        /// <para>为什么不会打转：SetSelection 只写本地状态 + 发 PropertyChanged，
+        /// 不调用任何引擎接口，所以"刷新 → 恢复选中 → 再刷新"这条回路不存在。</para>
+        /// </summary>
+        private void RestoreSelectionByOid(Slide slide)
+        {
+            if (slide == null || !ReferenceEquals(slide, _vm.CurrentSlide)) { _restoreSelection.Clear(); return; }
+            if (_restoreSelection.Count == 0) return;
+            var build = slide.CurrentBuild;
+            if (build == null) { _restoreSelection.Clear(); return; }
+
+            var pool = build.Objects.Where(o => o != null).ToList();
+            var matched = new List<CanvasObject>(_restoreSelection.Count);
+            foreach (var snap in _restoreSelection)
+            {
+                var hit = pool.FirstOrDefault(o => string.Equals(o.Oid, snap.Oid, StringComparison.Ordinal));
+                if (hit == null)
+                    hit = pool.FirstOrDefault(o => !matched.Contains(o)
+                                                   && o.Kind == snap.Kind
+                                                   && string.Equals(o.Loc, snap.Loc, StringComparison.Ordinal));
+                if (hit != null && !matched.Contains(hit)) matched.Add(hit);
+            }
+
+            _restoreSelection.Clear();
+            if (matched.Count == 0)
+            {
+                // 一个都对不上：宁可清空，也不要留着一个指向已销毁对象的选区。
+                _vm.ClearSelection();
+                _restorePrimaryOid = null;
+                return;
+            }
+
+            var primary = matched.FirstOrDefault(o => string.Equals(o.Oid, _restorePrimaryOid, StringComparison.Ordinal))
+                          ?? matched[0];
+            _restorePrimaryOid = null;
+            _vm.SetSelection(matched, primary);
+        }
+
+        /// <summary>
+        /// 单对象格式编辑：把 <see cref="FormatRequest"/> 摊平发给 edit RPC，返回 ok / error 原文。
+        /// 失败时不在本地做任何改动 —— 灯由随后的 scene 回填决定，天然与源码一致。
+        /// </summary>
+        public async Task<EditOutcome> EditOneAsync(string scene, FormatRequest req)
+        {
+            if (req == null) return EditOutcome.Fail("没有可提交的格式请求", default);
+            if (!IsConnected) return EditOutcome.Fail("未连接引擎", default);
+            try
+            {
+                var raw = await Edit(scene, req.Op, req.Args);
+                if (IsEngineFalse(raw, "ok"))
+                    return EditOutcome.Fail(GetStr(raw, "error") ?? "引擎未说明原因", raw);
+                return EditOutcome.Success(raw);
+            }
+            catch (EngineException ex)
+            {
+                return EditOutcome.Fail(ex.Message, default);
+            }
+        }
+
+        /// <summary>引擎回复是否明确失败（缺省 ok 视为成功，与仓库其他调用处一致）。</summary>
+        private static bool IsEngineFalse(JsonElement e, string name)
+            => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.False;
+
+        /// <summary>
+        /// 读某页最新的对象表（oid + loc + kind + 原文）。
+        /// <para>用途只有一个：多选批量格式化时，前一个对象的编辑可能让引擎重新编号，
+        /// 后面几个对象的 oid 就漂了，需要按「位置 + 类型 + 原文」重新认领。
+        /// 刚编辑完的页面走的是已缓存的渲染记录，这次读不会触发重新渲染。</para>
+        /// </summary>
+        public async Task<List<(string Oid, string Loc, ObjectKind Kind, string Value)>> ReadObjectTableAsync(string scene)
+        {
+            var rows = new List<(string Oid, string Loc, ObjectKind Kind, string Value)>();
+            if (!IsConnected || string.IsNullOrEmpty(scene)) return rows;
+            var data = await _engine.Scene(scene);
+            if (!data.TryGetProperty("objects", out var objs) || objs.ValueKind != JsonValueKind.Object)
+                return rows;
+            foreach (var prop in objs.EnumerateObject())
+                rows.Add((prop.Name,
+                          GetStr(prop.Value, "loc") ?? "",
+                          MapKind(GetStr(prop.Value, "kind") ?? "text"),
+                          GetStr(prop.Value, "value") ?? ""));
+            return rows;
         }
 
         private async Task RenderSpriteFor(CanvasObject co)
