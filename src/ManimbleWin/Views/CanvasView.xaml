@@ -276,12 +276,28 @@
                 <TextBlock Text="{Binding ToastText}" Foreground="White" FontSize="12"/>
             </Border>
 
-            <!-- 忙碌胶囊 -->
+            <!-- 忙碌胶囊：可取消（取消命令走引擎 cancel，import/export/build/编辑都能停） -->
             <Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="0,10,12,0"
-                    Background="{DynamicResource AccentBrush}" CornerRadius="14" Padding="12,6"
+                    Background="{DynamicResource AccentBrush}" CornerRadius="14" Padding="12,6,6,6"
                     Visibility="{Binding BusyVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="{Binding BusyText}" Foreground="White" FontSize="11" VerticalAlignment="Center"/>
+                    <Button Command="{Binding CancelBusyCommand}" ToolTip="取消当前作业" Margin="8,0,0,0"
+                            Width="18" Height="18" Cursor="Hand" Focusable="False">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Bd" Background="#33FFFFFF" CornerRadius="9">
+                                    <TextBlock Text="✕" FontSize="9" Foreground="White"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="#66FFFFFF"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
                 </StackPanel>
             </Border>
         </Grid>

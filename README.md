@@ -13,6 +13,8 @@ Manimble 的 **Windows（WPF）桌面版**：高度还原 macOS 版 Manimble 的
 - **动画预览**：`播放` 菜单可打开独立预览窗口，按 build 逐帧播放（真实引擎帧或本地对象帧），支持播放/暂停、上一帧/下一帧、进度，ESC 退出；连接引擎后走 `present` / `export_movie` 生成真实片段与 MP4。
 - **可交互终端**：调用本机真实的 `cmd.exe` / `powershell.exe`（`:help` / `:slides` / `:insert` / `:render` / `:play` / `:connect` 等应用内命令，Windows 命令直接敲），↑↓ 翻历史、回车执行；每个标签是独立会话，互不影响。
 - **依赖检测与引导**：首次启动弹出环境准备向导，菜单 `引擎 › 依赖中心` 随时可打开，检测 Python / Manim / FFmpeg / LaTeX 状态并引导安装；Manim 栈可一键安装到项目独立虚拟环境。
+- **Deck 生命周期 + 工作副本**：`新建演示文稿` / `打开演示文稿或项目`（目录、`.py`、`.manimble` 包）/ `保存到原始文件` / `保存项目副本` / `还原到原始文件` / `打开最近`。打开 deck 时会把「项目根 = deck 的父目录」整棵真实拷贝到 `%LOCALAPPDATA%\Manimble\work\…`，**所有编辑只作用于副本，只有「保存到原始文件」才把差异写回原目录**（原版行为，避免误改你的文件）。原目录被外部改动时会检测冲突并要你二选一；原目录被移走时拒绝写入并提示改用「保存项目副本」；关闭/切换前有未保存改动会三选一（保存 / 丢弃 / 取消）。
+- **导入导出**：`导入` 支持 PowerPoint(.pptx) 与 Beamer(.tex)；`导出为` 支持 PowerPoint(.pptx)、影片(.mp4)、Beamer(.tex)、Python(.py)。Keynote 与 PDF 在 Windows 上不可用（前者依赖 macOS Keynote，后者只是 Beamer 顺带的副产物），菜单已置灰并给出指引。Beamer 导入缺 LaTeX 宏包时会给出可安装的提示条，装完原位重排。
 - **全中文界面**：菜单、工具栏、面板、提示均为中文（Python 代码、快捷键与 Manim/LaTeX 等专有名词保留原文）。
 - **原型交互保留**：未连接引擎时自动回退到本地示例数据，界面与全部点击交互仍可用，便于无 Python 环境时演示。
 
@@ -66,7 +68,7 @@ dotnet run --project src/ManimbleWin/ManimbleWin.csproj
 3. 装完点“重新检测”，全部核心项就绪后点“启动 Manimble”。
 4. 主窗口状态栏右侧的绿点表示引擎已连接；从菜单 `引擎 › 连接 Manim 引擎` 可手动连接。
 
-> 未安装任何依赖也能启动应用：此时使用内置示例数据（纯界面演示）。连接引擎后会加载 `samples/hello/deck` 并渲染真实帧。
+> 未安装任何依赖也能启动应用：此时使用内置示例数据（纯界面演示）。连接引擎后会加载示例 deck（`samples/hello/deck`）的**工作副本**并渲染真实帧；编辑不会改动仓库里的示例原件，需要时才「保存到原始文件」。
 
 手动安装（等价于依赖中心的“一键安装”）：
 
@@ -187,9 +189,11 @@ ManimbleWin/
 ```
 （dist/ 与 Output/ 为构建产物，已在 .gitignore 中排除）
 
-## 未来对接真实引擎（不在本原型范围）
+## 引擎对接说明
 
-原版 `apps/windows/README.md` 已给出路线：Windows 前端作为共享 Python 引擎的第二个客户端，通过 JSON-lines 协议（原仓库的 `docs/developers/protocol.md`）通信。本原型中 `MainViewModel.ExecuteMenu()` 的每个 action 均注释了对应的引擎 `cmd`（open/state/scene/edit/insert/slide/notes/undo/redo/present/export…），可作为对接锚点。工作副本管理需实现“打开副本 → 编辑 → 写回原始 deck”。
+原版 `apps/windows/README.md` 已给出路线：Windows 前端作为共享 Python 引擎的第二个客户端，通过 JSON-lines 协议（原仓库的 `docs/developers/protocol.md`）通信。`MainViewModel.ExecuteMenu()` 的每个 action 均对应引擎 `cmd`（open/state/scene/edit/insert/slide/notes/undo/redo/present/export/import/settle/clear_history/latex_*…），可作为对接锚点。工作副本管理已实现「打开副本 → 编辑 → 保存时写回原始 deck」：`WorkspaceService` 负责整棵项目根拷贝、逐文件 baseline、差异写回、冲突检测与还原；`%LOCALAPPDATA%\Manimble` 存放工作副本、渲染缓存与最近文档（可用环境变量 `MANIMBLE_DATA_ROOT` 覆盖）。
+
+> 说明：未复刻的项（富格式栏的删除线/上下标/高亮、形状绘制、Scripted Presentation 演讲脚本、Feedback 批注）菜单里仍保留入口，点击会提示「原型模式 / 未实现」，不影响其它功能。
 
 ## 配色来源
 

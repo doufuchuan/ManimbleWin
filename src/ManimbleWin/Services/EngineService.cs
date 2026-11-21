@@ -263,6 +263,62 @@ namespace ManimbleWin.Services
                 ["path"] = path, ["include_media"] = includeMedia
             }, timeoutMs);
 
+        #region Deck 生命周期 / 导入导出 / LaTeX（薄封装）
+
+        // 参数名严格照抄 engine/manimble/rpc.py 与 core.py 的 req.get(...)/a["..."]（大小写、下划线）。
+
+        /// <summary>
+        /// 导入 PPTX / Beamer。返回的是受理 ack，真正的进度与结果由 <c>import</c> 事件回传
+        /// （rpc.py:110-135：building / done / error / cancelled）。
+        /// 导入阶段 deck 还没 open，取消走 <c>cancel</c> 命令里的 <c>cancel_import</c>（rpc.py:53）。
+        /// </summary>
+        public Task<JsonElement> Import(string src, string dest)
+            => Request("import", new { src, dest }, 60000);
+
+        /// <summary>
+        /// 导出 PPTX / Beamer。kind 只有 <c>pptx</c>/<c>beamer</c>/<c>keynote</c>（core.py:4083-4094）。
+        /// 返回 ack，结果走 <c>export</c> 事件；事件里的 <c>pdfError</c> 不是失败标志。
+        /// </summary>
+        public Task<JsonElement> Export(string kind, string path, bool builds, bool editable)
+            => Request("export", new { kind, path, builds, editable }, 60000);
+
+        /// <summary>把整份 deck 导成单个 .py（结构内联、按 show 顺序）。结果随响应返回。</summary>
+        public Task<JsonElement> ExportPython(string path)
+            => Request("export_python", new { path }, 60000);
+
+        /// <summary>等待引擎渲染队列排空（写回前必须调用，否则保存的是旧源码）。</summary>
+        public Task<JsonElement> Settle()
+            => Request("settle", null, 60000);
+
+        /// <summary>清空引擎撤销/重做历史（Revert 之后调用，避免从旧版本出发的撤销步）。</summary>
+        public Task<JsonElement> ClearHistory()
+            => Request("clear_history", null, 60000);
+
+        /// <summary>busy pill 的取消：停下正在进行的 import / build / export / 编辑。</summary>
+        public Task<JsonElement> Cancel()
+            => Request("cancel", null, 30000);
+
+        /// <summary>扫描一个 .tex 文件需要但本机没有的宏包：{missing:[...], tlmgr:bool}。</summary>
+        public Task<JsonElement> LatexMissing(string src)
+            => Request("latex_missing", new { src }, 60000);
+
+        /// <summary>当前 deck 仍缺的宏包与仍为占位图的图片数：{missing, placeholders, source}（需已 open）。</summary>
+        public Task<JsonElement> LatexStatus()
+            => Request("latex_status", null, 60000);
+
+        /// <summary>
+        /// 安装缺包。<b>进度走 <c>latex_install</c> 事件</b>（done/total/step），
+        /// 最终结果随本次 RPC 响应同步返回（rpc.py:138-142）——与 import/export 相反。
+        /// </summary>
+        public Task<JsonElement> LatexInstall(string[] files)
+            => Request("latex_install", new { files }, 900000);
+
+        /// <summary>把 assets 里的占位图按缺包重排（会写 assets，故必须能被 Save 写回）。</summary>
+        public Task<JsonElement> LatexRetypeset()
+            => Request("latex_retypeset", null, 300000);
+
+        #endregion
+
         /// <summary>搜索 BioCartoon 图标目录（首次会下载 catalog，超时给足）。</summary>
         public Task<JsonElement> BioSearch(string query, int limit, object filters)
             => Request("bio_search", new { query, limit = limit, filters = filters ?? new { } }, 150000);

@@ -4,7 +4,7 @@
         xmlns:views="clr-namespace:ManimbleWin.Views"
         xmlns:vm="clr-namespace:ManimbleWin.ViewModels"
         xmlns:conv="clr-namespace:ManimbleWin.Helpers"
-        Title="Manimble — hello" Height="860" Width="1440" MinHeight="640" MinWidth="1000"
+        Title="{Binding WindowTitle}" Height="860" Width="1440" MinHeight="640" MinWidth="1000"
         Background="{DynamicResource ChromeBackgroundBrush}"
         Foreground="{DynamicResource TextPrimaryBrush}"
         WindowStartupLocation="CenterScreen">
@@ -19,6 +19,7 @@
         <KeyBinding Key="N" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="NewDeck"/>
         <KeyBinding Key="O" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="OpenDeck"/>
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="Save"/>
+        <KeyBinding Key="W" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="Close"/>
         <KeyBinding Key="F" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="Find"/>
         <KeyBinding Key="T" Modifiers="Control+Shift" Command="{Binding MenuCommand}" CommandParameter="InsertText"/>
         <KeyBinding Key="N" Modifiers="Control+Shift" Command="{Binding MenuCommand}" CommandParameter="NewSlide"/>
@@ -35,6 +36,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/> <!-- Menu -->
+            <RowDefinition Height="Auto"/> <!-- 提示条（LaTeX 缺包 / 一般信息），默认折叠 -->
             <RowDefinition Height="Auto"/> <!-- Toolbar -->
             <RowDefinition Height="Auto"/> <!-- Home bar -->
             <RowDefinition Height="*"/>    <!-- Body -->
@@ -47,14 +49,46 @@
             <MenuItem Header="文件">
                 <MenuItem Header="新建演示文稿…" Command="{Binding MenuCommand}" CommandParameter="NewDeck" InputGestureText="Ctrl+N"/>
                 <MenuItem Header="打开演示文稿或项目…" Command="{Binding MenuCommand}" CommandParameter="OpenDeck" InputGestureText="Ctrl+O"/>
+
+                <!-- 打开最近：条目来自 RecentDecks（DisplayName 显示「父目录 / deck」，ToolTip 是完整路径） -->
+                <MenuItem Header="打开最近" ItemsSource="{Binding RecentDecks}">
+                    <MenuItem.ItemContainerStyle>
+                        <Style TargetType="{x:Type MenuItem}" BasedOn="{StaticResource {x:Type MenuItem}}">
+                            <Setter Property="Header" Value="{Binding DisplayName}"/>
+                            <Setter Property="ToolTip" Value="{Binding ToolTip}"/>
+                            <Setter Property="Command" Value="{Binding DataContext.OpenRecentCommand, RelativeSource={RelativeSource AncestorType={x:Type Menu}}}"/>
+                            <Setter Property="CommandParameter" Value="{Binding Path}"/>
+                        </Style>
+                    </MenuItem.ItemContainerStyle>
+                </MenuItem>
+                <MenuItem Header="清除最近记录" Command="{Binding ClearRecentCommand}"/>
+
                 <Separator/>
                 <MenuItem Header="保存到原始文件" Command="{Binding MenuCommand}" CommandParameter="Save" InputGestureText="Ctrl+S"/>
-                <MenuItem Header="导入…" Command="{Binding MenuCommand}" CommandParameter="Import"/>
+                <MenuItem Header="保存项目副本…" Command="{Binding MenuCommand}" CommandParameter="SaveProjectCopy"/>
+                <MenuItem Header="还原到原始文件" Command="{Binding MenuCommand}" CommandParameter="Revert"/>
+
+                <Separator/>
+                <MenuItem Header="导入">
+                    <MenuItem Header="PowerPoint (.pptx)" Command="{Binding MenuCommand}" CommandParameter="ImportPptx"/>
+                    <MenuItem Header="Beamer (.tex)" Command="{Binding MenuCommand}" CommandParameter="ImportBeamer"/>
+                    <MenuItem Header="Keynote (.key)" IsEnabled="False"
+                              ToolTip="Windows 不支持 .key：请先在 Keynote 里另存为 .pptx"/>
+                    <MenuItem Header="旧版 PowerPoint (.ppt)" IsEnabled="False"
+                              ToolTip="Windows 不支持 .ppt：请先另存为 .pptx"/>
+                </MenuItem>
                 <MenuItem Header="导出为">
-                    <MenuItem Header="PDF" Command="{Binding MenuCommand}" CommandParameter="ExportPDF"/>
                     <MenuItem Header="PowerPoint (.pptx)" Command="{Binding MenuCommand}" CommandParameter="ExportPPT"/>
                     <MenuItem Header="影片 (.mp4)" Command="{Binding MenuCommand}" CommandParameter="ExportMovie"/>
+                    <MenuItem Header="Beamer (.tex)" Command="{Binding MenuCommand}" CommandParameter="ExportBeamer"/>
+                    <MenuItem Header="Python (.py)" Command="{Binding MenuCommand}" CommandParameter="ExportPython"/>
+                    <MenuItem Header="Keynote (.key)" IsEnabled="False"
+                              ToolTip="Windows 不支持：请先导出 PowerPoint (.pptx)，再在 Mac 上用 Keynote 打开"/>
+                    <MenuItem Header="PDF" IsEnabled="False"
+                              ToolTip="PDF 只是 Beamer 导出时本机 TeX 顺带编译的副产物，不作为独立导出目标"/>
                 </MenuItem>
+
+                <Separator/>
                 <MenuItem Header="打包项目以便分享" Command="{Binding MenuCommand}" CommandParameter="Package"/>
                 <Separator/>
                 <MenuItem Header="关闭窗口" Command="{Binding MenuCommand}" CommandParameter="Close" InputGestureText="Ctrl+W"/>
@@ -174,8 +208,36 @@
             </MenuItem>
         </Menu>
 
+        <!-- ====== 提示条（LaTeX 缺包 / 一般信息）：默认折成 0 高度，不占位 ====== -->
+        <StackPanel Grid.Row="1">
+            <views:LatexNoticeBar/>
+
+            <!-- InfoHook 的落点：应用内横条，不弹模态框（关闭按钮在 code-behind 里处理） -->
+            <Border x:Name="InfoBar" Visibility="Collapsed" Style="{StaticResource NoticeBar}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Width="18" Height="18" CornerRadius="9" Margin="0,0,8,0"
+                            Background="{DynamicResource AccentBrush}" VerticalAlignment="Center">
+                        <TextBlock Text="i" FontSize="11" FontWeight="Bold" FontStyle="Italic" Foreground="White"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock x:Name="InfoTitle" Style="{StaticResource NoticeText}" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="InfoBody" Style="{StaticResource NoticeText}" FontSize="11"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                    <Button Grid.Column="2" Content="知道了" Style="{StaticResource NoticeLinkButton}"
+                            VerticalAlignment="Center" Click="InfoBarClose_Click"/>
+                </Grid>
+            </Border>
+        </StackPanel>
+
         <!-- ====== 工具栏 ====== -->
-        <Border Grid.Row="1" Background="{DynamicResource BarBackgroundBrush}" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}" Padding="6,5">
+        <Border Grid.Row="2" Background="{DynamicResource BarBackgroundBrush}" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}" Padding="6,5">
             <Grid>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
 
@@ -292,7 +354,7 @@
         </Border>
 
         <!-- ====== Home 格式栏 ====== -->
-        <Border Grid.Row="2" Background="{DynamicResource BarBackgroundBrush}" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}" Padding="8,4">
+        <Border Grid.Row="3" Background="{DynamicResource BarBackgroundBrush}" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}" Padding="8,4">
             <Grid>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
 
@@ -399,7 +461,7 @@
         </Border>
 
         <!-- ====== 主体：Navigator | Canvas+Drawer | Inspector+Source ====== -->
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="{Binding NavigatorWidth, Mode=TwoWay}"/>
                 <ColumnDefinition Width="Auto"/>
@@ -449,7 +511,7 @@
         </Grid>
 
         <!-- ====== 状态栏 ====== -->
-        <Border Grid.Row="4" Height="26" Background="{DynamicResource BarBackgroundBrush}" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource SeparatorBrush}" Padding="10,0">
+        <Border Grid.Row="5" Height="26" Background="{DynamicResource BarBackgroundBrush}" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource SeparatorBrush}" Padding="10,0">
             <Grid>
                 <TextBlock Text="{Binding StatusBarText}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">

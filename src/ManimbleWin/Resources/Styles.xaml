@@ -352,4 +352,58 @@
             </Setter.Value>
         </Setter>
     </Style>
+
+    <!-- ================= 提示条（LaTeX 缺包 / 一般信息） =================
+         用强调色的低饱和底 + 左侧色条，深色主题下不会刺眼，也不会盖住画布（占一行 Auto 高度）。 -->
+
+    <!-- 提示条容器 -->
+    <Style x:Key="NoticeBar" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="BorderThickness" Value="3,0,0,0"/>
+        <Setter Property="Padding" Value="10,6"/>
+    </Style>
+
+    <!-- 提示条里的次要按钮（暂不 / 不再询问） -->
+    <Style x:Key="NoticeLinkButton" TargetType="Button">
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Padding" Value="8,3"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleBackgroundBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 提示条里的主按钮（安装缺包） -->
+    <Style x:Key="NoticePrimaryButton" TargetType="Button" BasedOn="{StaticResource AccentButton}">
+        <Setter Property="Height" Value="24"/>
+        <Setter Property="Padding" Value="12,2"/>
+        <Setter Property="FontSize" Value="11"/>
+    </Style>
+
+    <!-- 提示条里的说明文字 -->
+    <Style x:Key="NoticeText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
 </ResourceDictionary>

@@ -36,10 +36,25 @@ namespace ManimbleWin.ViewModels
 
         private void Say(string msg) => Log?.Invoke(msg);
 
-        /// <summary>连接到真实引擎并加载示例 deck。返回是否成功。</summary>
-        public async Task<bool> ConnectAndLoad(string deckPath = null)
+        /// <summary>
+        /// 连接到真实引擎并打开 <paramref name="deckPath"/>（一般是工作副本的 deck，不是原目录）。
+        /// </summary>
+        /// <param name="deckPath">要打开的 deck（必须是工作副本里的 deck；不接受 null）。</param>
+        /// <param name="cacheDir">
+        /// 渲染缓存目录；null 用用户数据目录下的 render-cache。
+        /// 生命周期流程应传 <c>WorkspaceService.CacheDirFor(原路径)</c>，让重开同一个 deck 复用缓存。
+        /// </param>
+        public async Task<bool> ConnectAndLoad(string deckPath = null, string cacheDir = null)
         {
-            _deckPath = deckPath ?? EnvironmentService.SampleDeck;
+            // 绝不回落到 samples/hello：那会把渲染/写盘直接落到仓库里的示例上（绕过工作副本）。
+            // 需要「示例 deck」的调用方必须先建副本，再把副本 deck 传进来。
+            if (string.IsNullOrWhiteSpace(deckPath))
+            {
+                Say("没有指定要打开的 deck：请先建工作副本（OpenDeckAsync）再连引擎。");
+                StatusText = "未指定 deck";
+                return false;
+            }
+            _deckPath = deckPath;
             string python = EnvironmentService.FindPython(out _);
             if (python == null)
             {
@@ -61,8 +76,10 @@ namespace ManimbleWin.ViewModels
 
             try
             {
-                // cache 目录放在用户数据目录，长期保留
-                string cache = Path.Combine(EnvironmentService.UserDataDir, "render-cache");
+                // cache 目录默认放在用户数据目录，长期保留
+                string cache = string.IsNullOrEmpty(cacheDir)
+                    ? Path.Combine(EnvironmentService.UserDataDir, "render-cache")
+                    : cacheDir;
                 Directory.CreateDirectory(cache);
                 Say($"打开 deck：{_deckPath}");
                 await _engine.OpenDeck(_deckPath, cache);
@@ -942,6 +959,320 @@ namespace ManimbleWin.ViewModels
 
         /// <summary>引擎里的 deck 路径（判断剪贴板是不是「同一个 deck」）。</summary>
         public string DeckPath => _deckPath;
+
+        #endregion
+
+        #region Deck 生命周期 / 导入导出 / LaTeX 编排
+
+        // 统一沿用 PackageProject 的模式：临时订阅 EventReceived + TCS 等最终事件 + 超时兜底。
+        // 区别：import/export/export_movie 的结果走事件（RPC 只回 ack），latex_install 的结果走响应。
+
+        /// <summary>等待渲染队列排空（写回 / 还原 / 导出一致性原则：先 settle 再读文件）。</summary>
+        public async Task SettleAsync()
+        {
+            if (!IsConnected) return;
+            try { await _engine.Settle(); }
+            catch (EngineException ex) { Say("等待引擎排空失败：" + ex.Message); }
+        }
+
+        /// <summary>清空引擎撤销/重做历史（Revert 之后调用）。</summary>
+        public async Task ClearHistoryAsync()
+        {
+            if (!IsConnected) return;
+            try { await _engine.ClearHistory(); }
+            catch (EngineException ex) { Say("清空撤销历史失败：" + ex.Message); }
+        }
+
+        /// <summary>
+        /// 引擎撤销栈是否非空（<c>state</c> 的 <c>canUndo</c>）。
+        /// 还原之后应当是 false —— 用它确认 <c>clear_history</c> 真的生效（诊断与自测用）。
+        /// </summary>
+        public async Task<bool> EngineCanUndoAsync()
+        {
+            if (!IsConnected) return false;
+            try
+            {
+                JsonElement st = await _engine.Request("state");
+                if (st.ValueKind != JsonValueKind.Object) return false;
+                return st.TryGetProperty("canUndo", out var el) && el.ValueKind == JsonValueKind.True;
+            }
+            catch (EngineException ex)
+            {
+                Say("读取撤销状态失败：" + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 导入 PPTX / Beamer。
+        /// 进度（building 的 done/total/scene）通过 <paramref name="progress"/> 回传；
+        /// 返回 <c>done</c> 事件本身（含 <c>deck</c> / <c>slides</c> / <c>warnings</c>）；
+        /// 用户取消返回 <c>default</c>；失败抛 <see cref="EngineException"/>。
+        /// </summary>
+        public async Task<JsonElement> ImportDeckAsync(ImportRequest req, Action<int, int, string> progress = null,
+                                                      int timeoutMs = 3600000)
+        {
+            if (req == null) throw new ArgumentNullException(nameof(req));
+            if (!IsConnected) throw new EngineException("引擎未连接");
+
+            var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void Handler(JsonElement ev)
+            {
+                if (GetStr(ev, "event") != "import") return;
+                string phase = GetStr(ev, "phase");
+                if (phase == "building")
+                {
+                    progress?.Invoke(GetInt(ev, "done", 0), GetInt(ev, "total", 0), GetStr(ev, "scene") ?? "");
+                    return;
+                }
+                if (phase == "done") { tcs.TrySetResult(ev.Clone()); return; }
+                if (phase == "error") { tcs.TrySetException(new EngineException(GetStr(ev, "error") ?? "导入失败")); return; }
+                if (phase == "cancelled") tcs.TrySetResult(default);
+            }
+
+            _engine.EventReceived += Handler;
+            try
+            {
+                // dest 必须是「项目根」（<DestParent>/<DeckName>）：引擎会在它下面建 deck/ 与 assets/
+                string dest = req.DestPath ?? req.DestParent;
+                var accepted = await _engine.Import(req.SourcePath, dest);
+                if (accepted.ValueKind == JsonValueKind.Object
+                    && accepted.TryGetProperty("ok", out var okEl)
+                    && okEl.ValueKind == JsonValueKind.False)
+                    throw new EngineException(GetStr(accepted, "error") ?? "引擎拒绝了导入请求");
+
+                var finished = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+                if (finished != tcs.Task) { Say("等待导入完成超时"); return default; }
+                return await tcs.Task;
+            }
+            finally
+            {
+                _engine.EventReceived -= Handler;
+            }
+        }
+
+        /// <summary>
+        /// 导出 PPTX / Beamer（<c>export</c> 事件：building 进度 → done/error/cancelled）。
+        /// 注意 <c>done</c> 里的 <c>pdfError</c> 不是失败标志。
+        /// </summary>
+        public async Task<JsonElement> ExportDeckAsync(ExportRequest req, Action<int, int, string> progress = null,
+                                                      int timeoutMs = 3600000)
+        {
+            if (req == null) throw new ArgumentNullException(nameof(req));
+            string kind = EngineExportKind(req.Kind);
+            if (!IsConnected) throw new EngineException("引擎未连接");
+
+            var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void Handler(JsonElement ev)
+            {
+                if (GetStr(ev, "event") != "export") return;
+                string phase = GetStr(ev, "phase");
+                if (phase == "building")
+                {
+                    progress?.Invoke(GetInt(ev, "done", 0), GetInt(ev, "total", 0), GetStr(ev, "scene") ?? "");
+                    return;
+                }
+                if (phase == "keynote") { Say("正在转换为 Keynote…"); return; }
+                if (phase == "done") { tcs.TrySetResult(ev.Clone()); return; }
+                if (phase == "error") { tcs.TrySetException(new EngineException(GetStr(ev, "error") ?? "导出失败")); return; }
+                if (phase == "cancelled") tcs.TrySetResult(default);
+            }
+
+            _engine.EventReceived += Handler;
+            try
+            {
+                var accepted = await _engine.Export(kind, req.OutPath, req.Builds, req.Editable);
+                if (accepted.ValueKind == JsonValueKind.Object
+                    && accepted.TryGetProperty("ok", out var okEl)
+                    && okEl.ValueKind == JsonValueKind.False)
+                    throw new EngineException(GetStr(accepted, "error") ?? "引擎拒绝了导出请求");
+
+                var finished = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+                if (finished != tcs.Task) { Say("等待导出完成超时"); return default; }
+                return await tcs.Task;
+            }
+            finally
+            {
+                _engine.EventReceived -= Handler;
+            }
+        }
+
+        /// <summary>
+        /// 导出 MP4（<c>export_movie</c> 事件：encoding 进度 → done/error/cancelled）。
+        /// 与上面的旧 <see cref="ExportMovie(string)"/> 不同：这个等事件、有进度、可取消，且能选范围/分辨率/hold/fps。
+        /// </summary>
+        public async Task<JsonElement> ExportMovieAsync(ExportRequest req, Action<int, int, string> progress = null,
+                                                       int timeoutMs = 7200000)
+        {
+            if (req == null) throw new ArgumentNullException(nameof(req));
+            if (!IsConnected) throw new EngineException("引擎未连接");
+
+            var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void Handler(JsonElement ev)
+            {
+                if (GetStr(ev, "event") != "export_movie") return;
+                string phase = GetStr(ev, "phase");
+                if (phase == "encoding")
+                {
+                    progress?.Invoke(GetInt(ev, "done", 0), GetInt(ev, "total", 0), GetStr(ev, "scene") ?? "");
+                    return;
+                }
+                if (phase == "done") { tcs.TrySetResult(ev.Clone()); return; }
+                if (phase == "error") { tcs.TrySetException(new EngineException(GetStr(ev, "error") ?? "导出影片失败")); return; }
+                if (phase == "cancelled") tcs.TrySetResult(default);
+            }
+
+            _engine.EventReceived += Handler;
+            try
+            {
+                var accepted = await _engine.ExportMovie(req.OutPath, req.Scenes, req.Height, req.Hold, req.Fps);
+                if (accepted.ValueKind == JsonValueKind.Object
+                    && accepted.TryGetProperty("ok", out var okEl)
+                    && okEl.ValueKind == JsonValueKind.False)
+                    throw new EngineException(GetStr(accepted, "error") ?? "引擎拒绝了导出影片请求");
+
+                var finished = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+                if (finished != tcs.Task) { Say("等待导出影片完成超时"); return default; }
+                return await tcs.Task;
+            }
+            finally
+            {
+                _engine.EventReceived -= Handler;
+            }
+        }
+
+        /// <summary>导出单个 .py（结果随响应返回，不走事件）。</summary>
+        public async Task<JsonElement> ExportPythonAsync(string path)
+        {
+            if (!IsConnected) throw new EngineException("引擎未连接");
+            var r = await _engine.ExportPython(path);
+            if (r.ValueKind == JsonValueKind.Object && r.TryGetProperty("ok", out var okEl) && okEl.ValueKind == JsonValueKind.False)
+                throw new EngineException(GetStr(r, "error") ?? "导出 Python 失败");
+            return r;
+        }
+
+        /// <summary>
+        /// 预扫描一个 .tex 需要但本机缺的宏包。返回 <c>{missing:[...], tlmgr:bool}</c>。
+        /// Windows 一般没有 tlmgr，前端据此给 MiKTeX 的手工引导。
+        /// </summary>
+        public Task<JsonElement> LatexMissingAsync(string src)
+        {
+            if (!IsConnected) throw new EngineException("引擎未连接");
+            return _engine.LatexMissing(src);
+        }
+
+        /// <summary>当前 deck 仍缺的宏包与仍是占位图的图片数（必须在 deck 已 open 后调用）。</summary>
+        public Task<JsonElement> LatexStatusAsync()
+        {
+            if (!IsConnected) throw new EngineException("引擎未连接");
+            return _engine.LatexStatus();
+        }
+
+        /// <summary>
+        /// 安装缺包：进度走 <c>latex_install</c> 事件（done/total/step），最终结果随响应返回。
+        /// 返回值里可能有 <c>ok=false</c> 与 <c>error</c>，由调用方判断并给 MiKTeX 引导。
+        /// </summary>
+        public async Task<JsonElement> LatexInstallAsync(string[] files, Action<int, int, string> progress = null)
+        {
+            if (!IsConnected) throw new EngineException("引擎未连接");
+
+            void Handler(JsonElement ev)
+            {
+                if (GetStr(ev, "event") != "latex_install") return;
+                progress?.Invoke(GetInt(ev, "done", 0), GetInt(ev, "total", 0), GetStr(ev, "step") ?? "");
+            }
+
+            _engine.EventReceived += Handler;
+            try
+            {
+                return await _engine.LatexInstall(files ?? Array.Empty<string>());
+            }
+            finally
+            {
+                _engine.EventReceived -= Handler;
+            }
+        }
+
+        /// <summary>把 assets 里的占位图按缺包重排（会改写 assets，故其后必须能让 Save 写回）。</summary>
+        public async Task<JsonElement> LatexRetypesetAsync()
+        {
+            if (!IsConnected) throw new EngineException("引擎未连接");
+            var r = await _engine.LatexRetypeset();
+            if (r.ValueKind == JsonValueKind.Object && r.TryGetProperty("ok", out var okEl) && okEl.ValueKind == JsonValueKind.False)
+                throw new EngineException(GetStr(r, "error") ?? "重排占位图失败");
+            return r;
+        }
+
+        /// <summary>
+        /// 还原到原始文件：<c>settle</c> → 调 <paramref name="revertFiles"/> 按 baseline 恢复副本
+        /// → <c>clear_history</c> 清撤销栈（不留从旧版本出发的撤销步）→ 重载场景与当前页。
+        /// </summary>
+        /// <param name="revertFiles">恢复文件的工作（一般是 <c>WorkspaceService.Revert</c>）；返回 false 表示中止。</param>
+        public async Task<bool> RevertEngineAsync(Func<bool> revertFiles = null)
+        {
+            if (!IsConnected)
+            {
+                Say("引擎未连接，无法还原");
+                return false;
+            }
+            try
+            {
+                await _engine.Settle();
+                if (revertFiles != null && !revertFiles())
+                {
+                    Say("还原文件失败，已中止");
+                    return false;
+                }
+                await _engine.ClearHistory();
+                await ReloadSlides();
+                if (_vm.CurrentSlide != null && EngineScenes.Contains(_vm.CurrentSlide.Name))
+                    await LoadSceneInto(_vm.CurrentSlide);
+                int index = _vm.CurrentSlide != null ? _vm.Slides.IndexOf(_vm.CurrentSlide) : -1;
+                _vm.SelectSlideByIndex(index);
+                Say("已还原到原始文件");
+                return true;
+            }
+            catch (EngineException ex)
+            {
+                Say("还原失败：" + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>busy pill 的取消：停下正在跑的 import / build / export / 编辑。</summary>
+        public async Task CancelBusy()
+        {
+            if (!IsConnected) return;
+            try
+            {
+                await _engine.Cancel();
+                Say("已请求取消当前作业");
+            }
+            catch (EngineException ex)
+            {
+                Say("取消失败：" + ex.Message);
+            }
+        }
+
+        /// <summary><see cref="ExportKind"/> → 引擎 <c>export</c> 的 kind。Movie/Python 不是 export 的 kind。</summary>
+        private static string EngineExportKind(ExportKind kind)
+        {
+            switch (kind)
+            {
+                case ExportKind.Pptx: return "pptx";
+                case ExportKind.Beamer: return "beamer";
+                case ExportKind.KeynoteDisabled: return "keynote";
+                case ExportKind.Movie:
+                    throw new EngineException("导出 MP4 请用 ExportMovieAsync");
+                case ExportKind.Python:
+                    throw new EngineException("导出 Python 请用 ExportPythonAsync");
+                default:
+                    throw new EngineException("未知的导出类型：" + kind);
+            }
+        }
 
         #endregion
 

@@ -1,0 +1,45 @@
+<UserControl x:Class="ManimbleWin.Views.LatexNoticeBar"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             UseLayoutRounding="True">
+    <!--
+        LaTeX 缺包 / 占位图提示条：占一行 Auto 高度，插在菜单栏与工具栏之间，不遮挡画布。
+        DataContext 直接沿用 MainWindow 的 MainViewModel（不再套一层 VM）。
+        可见性由 LatexNoticeVisible 控制（有缺包或占位图、且用户没选「不再询问」）。
+    -->
+    <Border Style="{StaticResource NoticeBar}"
+            Visibility="{Binding LatexNoticeVisible, Converter={StaticResource BoolToVis}}">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 图标：一个描边的感叹号圆点，跟着强调色走 -->
+            <Border Grid.Column="0" Width="18" Height="18" CornerRadius="9" Margin="0,0,8,0"
+                    Background="{DynamicResource AccentBrush}" VerticalAlignment="Center">
+                <TextBlock Text="!" FontSize="11" FontWeight="Bold" Foreground="White"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+
+            <TextBlock Grid.Column="1" Style="{StaticResource NoticeText}"
+                       Text="{Binding LatexNoticeText}" ToolTip="{Binding LatexNoticeText}"/>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                <Button Content="安装缺包" Style="{StaticResource NoticePrimaryButton}"
+                        Command="{Binding LatexInstallCommand}"
+                        ToolTip="用本机 TeX 安装缺少的宏包，装完自动重排占位图"/>
+                <Button Content="重新检测" Style="{StaticResource NoticeLinkButton}" Margin="6,0,0,0"
+                        Command="{Binding LatexRetryCommand}"
+                        ToolTip="已经手动装好了？点这里重新检查"/>
+                <Button Content="暂不" Style="{StaticResource NoticeLinkButton}"
+                        Command="{Binding LatexDismissCommand}" CommandParameter="False"
+                        ToolTip="这次先不处理（下次打开 deck 仍会提示）"/>
+                <Button Content="不再询问" Style="{StaticResource NoticeLinkButton}"
+                        Command="{Binding LatexDismissCommand}" CommandParameter="True"
+                        ToolTip="本次会话不再提示（下次导入仍会重新检测）"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

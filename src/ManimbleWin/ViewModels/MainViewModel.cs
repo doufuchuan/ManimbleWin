@@ -19,7 +19,7 @@ namespace ManimbleWin.ViewModels
     /// 主视图模型：驱动整个窗口。数据与交互均为原型模拟（不接真实 Manim 引擎），
     /// 但结构上预留了未来对接 engine/manimble JSON 协议的位置（见 ExecuteMenu 中标注）。
     /// </summary>
-    public class MainViewModel : ObservableObject
+    public partial class MainViewModel : ObservableObject
     {
         #region 集合与当前状态
 
@@ -372,10 +372,20 @@ namespace ManimbleWin.ViewModels
         public string BusyText { get => _busyText; set { if (SetProperty(ref _busyText, value)) RaisePropertyChanged(nameof(BusyVisible)); } }
         public bool BusyVisible => !string.IsNullOrEmpty(BusyText);
 
-        public string StatusBarText => CurrentSlide == null
-            ? "未加载演示文稿"
-            : $"演示文稿: hello   ·   第 {CurrentSlide.Number}/{Slides.Count} 页   ·   构建 {CurrentSlide.CurrentBuildIndex + 1}/{CurrentSlide.Builds.Count}   ·   {CurrentObjects?.Count ?? 0} 个对象"
-              + (SelectedObjects.Count > 1 ? $"（已选 {SelectedObjects.Count}）" : "");
+        /// <summary>
+        /// 状态栏：deck 名（未保存时带 *）+ 页码/构建/对象数。
+        /// deck 名用「父目录 / deck」——很多项目的 deck 都叫 deck，只显示末级分不清。
+        /// </summary>
+        public string StatusBarText
+        {
+            get
+            {
+                if (CurrentSlide == null)
+                    return _session == null ? "未加载演示文稿" : $"演示文稿: {DeckDisplayName}   ·   没有可显示的幻灯片";
+                return $"演示文稿: {DeckDisplayName}{(IsModified ? " *" : "")}   ·   第 {CurrentSlide.Number}/{Slides.Count} 页   ·   构建 {CurrentSlide.CurrentBuildIndex + 1}/{CurrentSlide.Builds.Count}   ·   {CurrentObjects?.Count ?? 0} 个对象"
+                      + (SelectedObjects.Count > 1 ? $"（已选 {SelectedObjects.Count}）" : "");
+            }
+        }
 
         // 画布标尺刻度（设计坐标 1280 宽，每 100 一大格）
         public ObservableCollection<RulerMark> RulerMarks { get; } = BuildRulerMarks();
@@ -1168,8 +1178,12 @@ namespace ManimbleWin.ViewModels
         /// <summary>交互式终端视图模型。</summary>
         public TerminalViewModel Terminal { get; }
 
-        /// <summary>当前 deck 所在文件夹（终端 pwd 用）。</summary>
-        public string DeckFolder => EnvironmentService.SampleDeck;
+        /// <summary>
+        /// 当前 deck 所在文件夹（终端 pwd、图片拷贝都用它）。
+        /// 编辑期一律指向<b>工作副本</b>：写进 assets 的图片要落在副本里，才会被 Save 写回原目录。
+        /// 没有会话时才回退到示例 deck（原型模式）。
+        /// </summary>
+        public string DeckFolder => _session?.WorkDeckPath ?? EnvironmentService.SampleDeck;
 
         #endregion
 
@@ -1352,6 +1366,11 @@ namespace ManimbleWin.ViewModels
             _engine = new EngineIntegration(this);
             _engine.Log += msg => ShowToast(msg);
 
+            // 工作副本与最近文档（日志走状态栏，不弹 Toast，避免每次保存都刷屏）
+            _workspace = new WorkspaceService(msg => StatusMessage = msg);
+            _recent = new RecentDecksService(msg => StatusMessage = msg);
+            ReloadRecentDecks();
+
             // 坐标写回引擎的节流器（拖动停手 0.7 秒后提交一次）
             _engineSync = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
             _engineSync.Tick += async (s, e) =>
@@ -1382,15 +1401,22 @@ namespace ManimbleWin.ViewModels
             _notesTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
             _notesTimer.Tick += (s, e) => FlushPendingNotesNow();
 
-            // 首次启动：窗口呈现后再弹出环境准备向导，避免阻塞主窗口构造
-            Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+            // 首次启动：窗口呈现后再弹出环境准备向导，避免阻塞主窗口构造。
+            // 环境就绪时接着把示例 deck 打开成工作副本 —— 用户第一笔编辑就落在副本里，
+            // 而不是直接改 samples/hello（那是仓库里的原件）。
+            if (!SuppressStartupAutoOpen)
             {
-                if (!AppFlags.SetupSeen)
+                Application.Current?.Dispatcher.BeginInvoke(new Action(async () =>
                 {
-                    OpenDependencyCenter(true);
-                    AppFlags.SetupSeen = true;
-                }
-            }), System.Windows.Threading.DispatcherPriority.Loaded);
+                    if (!AppFlags.SetupSeen)
+                    {
+                        OpenDependencyCenter(true);
+                        AppFlags.SetupSeen = true;
+                    }
+                    if (_session == null && !_engine.IsConnected && EnvironmentService.FindPython(out _) != null)
+                        await OpenDeckAsync(EnvironmentService.SampleDeck, confirmUnsaved: false);
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            }
         }
 
         #region 数据构建
@@ -1842,7 +1868,9 @@ namespace ManimbleWin.ViewModels
         /// </summary>
         private (string relative, string dest) CopyImageIntoDeck(string sourceFile)
         {
-            string deck = _engine?.DeckPath;
+            // 一定落在工作副本里（DeckFolder = 副本 deck）；未打开 deck 时才回退示例目录。
+            // 若这里还写 EnvironmentService.SampleDeck，图片会绕过副本、既不进 baseline 也写不回原目录。
+            string deck = DeckFolder;
             if (string.IsNullOrEmpty(deck) || !Directory.Exists(deck)) deck = EnvironmentService.SampleDeck;
             Directory.CreateDirectory(deck);
             string assets = Path.Combine(deck, "assets");
@@ -2506,12 +2534,36 @@ namespace ManimbleWin.ViewModels
             // open/state/scene/edit/insert/slide/notes/undo/redo/present/export...
             switch (action)
             {
-                case "NewDeck": ShowToast("文件 ▸ 新建演示文稿… — 原型模式"); break;
-                case "OpenDeck": ShowToast("文件 ▸ 打开演示文稿或项目… — 原型模式"); break;
-                case "Save": ShowToast("已保存到原始文件（模拟）"); break;
+                // ---- File ▸ 生命周期（P0-3~P0-9、P0-13）----
+                case "NewDeck": _ = NewDeckAsync(); break;
+                case "OpenDeck": _ = OpenDeckDialogAsync(); break;
+                case "OpenDeckPackage": _ = OpenPackageDialogAsync(); break;
+                case "Save": _ = SaveAsync(); break;
+                case "Revert": _ = RevertAsync(); break;
+                case "SaveProjectCopy": _ = SaveProjectCopyAsync(); break;
+                case "ClearRecent": ClearRecent(); break;
                 case "Package": _ = PackageProjectAsync(); break;
-                case "Close": Application.Current.MainWindow?.Close(); break;
-                case "Quit": Application.Current.Shutdown(); break;
+                case "Close": _ = CloseWindowAsync(); break;
+                case "Quit": _ = QuitAsync(); break;
+
+                // ---- File ▸ 导入（T04，P0-10/11）----
+                case "Import": _ = ImportAsync(ImportKind.Pptx); break;
+                case "ImportPptx": _ = ImportAsync(ImportKind.Pptx); break;
+                case "ImportBeamer": _ = ImportAsync(ImportKind.Beamer); break;
+                case "ImportKeynote": ShowKeynoteImportHint(".key"); break;
+                case "ImportOldPpt": ShowKeynoteImportHint(".ppt"); break;
+
+                // ---- File ▸ 导出为（T04，P0-12）----
+                case "ExportPPT": _ = ExportAsync(ExportKind.Pptx); break;
+                case "ExportMovie": _ = ExportAsync(ExportKind.Movie); break;
+                case "ExportBeamer": _ = ExportAsync(ExportKind.Beamer); break;
+                case "ExportPython": _ = ExportAsync(ExportKind.Python); break;
+                case "ExportKeynote": _ = ExportAsync(ExportKind.KeynoteDisabled); break;
+                case "ExportPDF": ExplainPdfExport(); break;
+
+                // ---- LaTeX 缺包提示条 ----
+                case "LatexRetry": _ = CheckLatexNoticeAsync(); break;
+                case "CancelBusy": _ = CancelBusyAsync(); break;
 
                 case "Undo": _ = UndoAsync(); break;
                 case "Redo": _ = RedoAsync(); break;
@@ -2646,20 +2698,27 @@ namespace ManimbleWin.ViewModels
             RebuildSourceLines();
         }
 
+        /// <summary>
+        /// 「连接引擎」统一走生命周期入口：建工作副本 → 引擎 open 副本。
+        /// 已打开 deck 时重开原件（会先走未保存确认）；否则打开示例 deck 作为起点。
+        /// </summary>
         private async Task ConnectEngine()
         {
-            if (_engine.IsConnected)
+            if (_engine.IsConnected && _session != null)
             {
                 ShowToast("引擎已连接");
                 return;
             }
             EngineStatus = "正在启动引擎…";
-            bool ok = await _engine.ConnectAndLoad();
-            EngineStatus = ok ? "已连接 · 真实渲染" : "未连接 · 原型数据";
-            RaisePropertyChanged(nameof(IsEngineConnected));
-            RaisePropertyChanged(nameof(EngineStatusBrush));
-            RaisePropertyChanged(nameof(UseRealRender));
-            ShowToast(ok ? "Manim 引擎已连接，正在渲染示例 deck" : "引擎未连接，可在依赖中心安装后重试");
+            string deck = _session?.OriginalDeckPath ?? EnvironmentService.SampleDeck;
+            bool ok = await OpenDeckAsync(deck, confirmUnsaved: _session == null);
+            if (!ok)
+            {
+                EngineStatus = "未连接 · 原型数据";
+                RaisePropertyChanged(nameof(IsEngineConnected));
+                RaisePropertyChanged(nameof(EngineStatusBrush));
+                ShowToast("引擎未连接，可在依赖中心安装后重试");
+            }
         }
 
         /// <summary>打开依赖中心/首次启动向导。</summary>
